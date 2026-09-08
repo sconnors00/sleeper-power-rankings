@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Season &middot; {{ league_name }}{% endblock %}
+{% block content %}
+
+<h1 class="page-title">Season scoring board</h1>
+
+<section>
+  <h2>Weekly log</h2>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Week</th><th>Top scorer</th><th>Score</th></tr></thead>
+    <tbody>
+      {% for entry in board.log %}
+      <tr>
+        <td><a href="{{ week_url(entry.week) }}">{{ entry.week }}</a></td>
+        <td>{% for rid in entry.top_scorer_roster_ids %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+        <td>{{ entry.top_score | fmt2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Crown count</h2>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Team</th><th>Weeks as top scorer</th></tr></thead>
+    <tbody>
+      {% for rid, count in board.crown_counts.items() | sort(attribute="1", reverse=True) %}
+      <tr><td>{{ teams[rid].name }}</td><td>{{ count }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Points-for leaderboard</h2>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Team</th><th>PF</th><th>Avg</th><th>Best week</th><th>Worst week</th></tr></thead>
+    <tbody>
+      {% for row in board.pf_leaderboard %}
+      <tr>
+        <td>{{ teams[row.roster_id].name }}</td>
+        <td>{{ row.pf | fmt2 }}</td>
+        <td>{{ row.avg | fmt2 }}</td>
+        <td>Wk {{ row.best_week }}: {{ row.best_week_score | fmt2 }}</td>
+        <td>Wk {{ row.worst_week }}: {{ row.worst_week_score | fmt2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="awards-grid">
+  <div class="award-card award-good">
+    <h3>Highest team score</h3>
+    <p class="award-value">{{ board.records.highest_team_score[2] | fmt2 }}</p>
+    <p class="award-teams">{% for rid in board.records.highest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ board.records.highest_team_score[1] }})</p>
+  </div>
+  <div class="award-card award-bad">
+    <h3>Lowest team score</h3>
+    <p class="award-value">{{ board.records.lowest_team_score[2] | fmt2 }}</p>
+    <p class="award-teams">{% for rid in board.records.lowest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ board.records.lowest_team_score[1] }})</p>
+  </div>
+  <div class="award-card">
+    <h3>Highest starter</h3>
+    {% set pairs, wk = board.records.highest_starter %}
+    <p class="award-value">{% if pairs %}{{ pairs[0][1].points | fmt2 }}{% endif %}</p>
+    <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
+  </div>
+  <div class="award-card">
+    <h3>Highest bench player</h3>
+    {% set pairs, wk = board.records.highest_bench_player %}
+    <p class="award-value">{% if pairs %}{{ pairs[0][1].points | fmt2 }}{% endif %}</p>
+    <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
+  </div>
+</section>
+
+<section class="chart-section">
+  <h2>Weekly points by team</h2>
+  <div class="chart-container"><canvas id="chart-weekly-points"></canvas></div>
+</section>
+
+<section class="chart-section">
+  <h2>Weekly scoring spread</h2>
+  <div class="chart-container"><canvas id="chart-scoring-spread"></canvas></div>
+</section>
+
+<section class="chart-section">
+  <h2>Luck</h2>
+  <div class="chart-container"><canvas id="chart-luck"></canvas></div>
+</section>
+
+<section class="chart-section">
+  <h2>Points for vs. points against</h2>
+  <div class="chart-container chart-tall"><canvas id="chart-pf-pa"></canvas></div>
+</section>
+
+<section class="chart-section">
+  <h2>Points left on bench</h2>
+  <div class="chart-container chart-tall"><canvas id="chart-bench"></canvas></div>
+</section>
+
+{% endblock %}

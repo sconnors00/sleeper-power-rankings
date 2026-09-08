@@ -1,93 +1,121 @@
-# sleeper-power-rankings
+# sleeper-power-rankings (ffpr)
 
+A small Python tool that pulls a Sleeper fantasy football league from the
+[Sleeper API](https://docs.sleeper.com) and builds a static, mobile-first web
+page: power rankings, weekly awards, a season scoring board, and a handful of
+Chart.js charts. No servers, no logins, no frontend framework -- plain
+HTML/CSS/JS, rebuilt from scratch on every run and hosted with GitLab Pages.
 
+## Setup
 
-## Getting started
+Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://git.scone.us/homelab/sleeper-power-rankings.git
-git branch -M main
-git push -uf origin main
+```bash
+git clone https://git.scone.us/homelab/sleeper-power-rankings.git
+cd sleeper-power-rankings
+uv sync
 ```
 
-## Integrate with your tools
+### Finding a Sleeper league ID
 
-* [Set up project integrations](https://git.scone.us/homelab/sleeper-power-rankings/-/settings/integrations)
+- Open the league in the Sleeper app or at `sleeper.com/leagues/<id>/...` --
+  the number in the URL is the league ID.
+- Or, via the API: `GET /user/<username>` to get your `user_id`, then
+  `GET /user/<user_id>/leagues/nfl/<season>` to list your leagues for that
+  season.
 
-## Collaborate with your team
-
-* [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Set the league ID in `config.toml` (`league_id`), or override per-run with
+`--league`, or set the `SLEEPER_LEAGUE_ID` environment variable (checked in
+that order of precedence: `--league` > env var > `config.toml`).
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+uv run ffpr build              # build site/ through the latest completed week
+uv run ffpr build --through 8  # build only through week 8
+uv run ffpr build --provisional  # also include the in-progress week (excluded from rankings)
+uv run ffpr serve              # preview at http://localhost:8000
+uv run ffpr blurb              # print a chat-ready recap of the latest week
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+Every command accepts `--league <id>` and `--season <year>` overrides.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+Raw Sleeper API responses are cached under `data/<season>/raw/` (gitignored)
+so completed weeks are never refetched and builds work offline once cached;
+the in-progress week and league/roster/user data are always refetched. The
+`data/players_nfl.json` cache (the ~5 MB player map) refreshes at most once a
+day, per Sleeper's guidance.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## Tuning the power rankings
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Weights and the "form" (recent performance) window live in `config.toml`:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```toml
+[weights]
+win_pct = 0.30
+allplay_pct = 0.25
+pf_norm = 0.30
+form_norm = 0.15
 
-## License
-For open source projects, say how it is licensed.
+[form]
+window = 3
+```
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+`score = Σ weight × component`, ranked descending. See the build spec
+(`sleeper-power-rankings-prompt.md`) for exactly how each component is
+computed.
+
+## Weekly flow
+
+A GitLab CI/CD pipeline schedule rebuilds and republishes the site every
+Tuesday morning automatically. To trigger a build manually, go to **Build >
+Pipelines** in this project and click **Run pipeline** on the default branch.
+Nothing is ever committed back to the repo -- every run rebuilds `site/` from
+scratch from the Sleeper API.
+
+## GitLab setup (one-time, manual)
+
+This repo ships `.gitlab-ci.yml` with a `build-and-publish` job that installs
+`uv`, runs `ffpr build`, and publishes `site/` as the Pages content. You need
+to configure three things in the GitLab UI:
+
+1. **CI/CD variable** -- **Settings > CI/CD > Variables** -- add:
+   - Key: `SLEEPER_LEAGUE_ID`
+   - Value: `1378825622272356352` (the 2026 league)
+   - Type: Variable, not masked/protected unless your default branch is
+     protected (in which case mark it protected too so it's available to
+     pipelines on that branch)
+
+2. **Pipeline schedule** -- **Build > Pipeline schedules > New schedule**:
+   - Description: `Weekly rebuild`
+   - Interval pattern (cron): `0 7 * * 2` (Tuesday 7:00)
+   - Timezone: `America/New_York`
+   - Target branch: your default branch
+
+3. **GitLab Pages** -- enable Pages for this project (**Deploy > Pages** or
+   your instance's equivalent) and make sure the Pages hostname is exposed to
+   the internet if you want your league mates to reach it from their phones.
+   Once enabled, note the URL GitLab gives you and set `site_url` in
+   `config.toml` to it (used only for the link `ffpr blurb` prints).
+
+If this GitLab instance is too old to support the `pages: true` / `publish:`
+job keys (needs GitLab >= 17.1), swap to the commented-out fallback `pages:`
+job at the bottom of `.gitlab-ci.yml`, which copies `site/` to `public/`
+instead.
+
+Because `site/` is fully self-contained (relative asset paths, no absolute
+domain references), the same `public/` (or `site/`) output can also be
+rsynced to nginx on the homelab instance instead of using Pages, if you ever
+want to skip Pages entirely.
+
+## Development
+
+```bash
+uv run pytest        # unit tests + a build smoke test, against committed fixtures
+uv run ruff check .  # lint
+uv run ruff format . # format
+```
+
+`tests/fixtures/` holds real (trimmed) Sleeper API responses from one week of
+a past season so `compute.py` and `build.py` can be tested without hitting
+the network.

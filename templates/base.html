@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ league_name }}{% endblock %}</title>
+<link rel="stylesheet" href="{{ asset_prefix }}static/style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="site-header-row">
+    <a class="site-title" href="{{ asset_prefix }}index.html">{{ league_name }}</a>
+    <span class="season-year">{{ season_year }}</span>
+  </div>
+  <nav class="site-nav">
+    <a href="{{ asset_prefix }}index.html">Latest</a>
+    <a href="{{ asset_prefix }}season.html">Season</a>
+    {% if all_weeks %}
+    <select class="week-picker" onchange="if(this.value) window.location = this.value;">
+      <option value="">Jump to week&hellip;</option>
+      {% for w in all_weeks %}
+      <option value="{{ asset_prefix }}{{ week_url(w) }}">Week {{ w }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </nav>
+</header>
+<main class="site-main">
+{% block content %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <p>Built automatically from <a href="https://docs.sleeper.com" target="_blank" rel="noopener">Sleeper</a> league data.</p>
+</footer>
+<script src="{{ chart_js_url }}" integrity="{{ chart_js_sri }}" crossorigin="anonymous"></script>
+<script src="{{ asset_prefix }}data.js"></script>
+<script src="{{ asset_prefix }}static/app.js"></script>
+</body>
+</html>
