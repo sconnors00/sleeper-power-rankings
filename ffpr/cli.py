@@ -75,9 +75,8 @@ def _find_through_week(
 def _fetch_draft(client: SleeperClient, league_obj: dict) -> tuple[dict, list[dict]] | None:
     """(draft, picks) for the league's completed auction draft, or None.
 
-    Only feeds draft.html's grading -- pre-season rankings are roster-talent
-    based and don't need this. Best-effort: no draft, a snake draft, or a
-    fetch failure with no cache just means no draft grades.
+    Only feeds draft.html's grading. Best-effort: no draft, a snake draft,
+    or a fetch failure with no cache just means no draft grades.
     """
     draft_id = league_obj.get("draft_id")
     if not draft_id:
@@ -97,27 +96,56 @@ def _build_preseason(
     league_obj: dict,
     current_rosters: list[dict],
     players: dict,
+    weights: dict[str, float],
+    form_window: int,
 ) -> list[PreseasonRow]:
-    """Roster-talent rankings before week 1 -- only the players on a roster
-    affect this, never draft prices or last season's results.
+    """Last season's final power rankings mapped onto this season's rosters.
+
+    Best-effort: any failure (no previous league, network trouble with no
+    cache) just means no pre-season rankings, never a failed build.
     """
-    prev_rosters: list[dict] = []
     prev_id = league_obj.get("previous_league_id")
-    if prev_id:
-        try:
-            prev_league = client.get_league(prev_id)
-            prev_rosters = client.get_rosters(prev_id, prev_league["season"])
-        except (SleeperError, httpx.HTTPError):
-            prev_rosters = []
+    if not prev_id:
+        return []
+    try:
+        prev_league = client.get_league(prev_id)
+        prev_season = prev_league["season"]
+        prev_rosters = client.get_rosters(prev_id, prev_season)
+        prev_playoff_start = prev_league["settings"]["playoff_week_start"]
+        prev_weeks_raw = {
+            wk: client.get_matchups(prev_id, prev_season, wk, completed=True)
+            for wk in range(1, prev_playoff_start)
+        }
+    except (SleeperError, httpx.HTTPError):
+        return []
+
+    prev_rosters_by_id = {r["roster_id"]: r for r in prev_rosters}
+    prev_summaries = build_week_summaries(
+        [r["roster_id"] for r in prev_rosters],
+        prev_weeks_raw,
+        prev_rosters_by_id,
+        players,
+        bool(prev_league["settings"].get("league_average_match", 0)),
+        weights,
+        form_window,
+    )
+    if not prev_summaries:
+        return []
+    apply_official_records(prev_summaries[-1].power_rankings, prev_rosters_by_id)
+    prev_pf_by_roster = {
+        r["roster_id"]: (r.get("settings", {}).get("fpts", 0) or 0)
+        + (r.get("settings", {}).get("fpts_decimal", 0) or 0) / 100
+        for r in prev_rosters
+    }
 
     champion_raw = (league_obj.get("metadata") or {}).get("latest_league_winner_roster_id")
     champion_roster_id = int(champion_raw) if champion_raw and str(champion_raw).isdigit() else None
 
     return build_preseason_rankings(
+        prev_summaries[-1].power_rankings,
+        prev_pf_by_roster,
         current_rosters,
         prev_rosters,
-        players,
-        league_obj["roster_positions"],
         champion_roster_id,
     )
 
@@ -190,7 +218,7 @@ def _build_season_summary(
 
     preseason: list[PreseasonRow] = []
     if through_week == 0:
-        preseason = _build_preseason(client, league_obj, rosters, players)
+        preseason = _build_preseason(client, league_obj, rosters, players, weights, form_window)
 
     return SeasonSummary(
         season=season,

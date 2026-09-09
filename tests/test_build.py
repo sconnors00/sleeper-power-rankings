@@ -100,9 +100,9 @@ def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_s
         PreseasonRow(
             roster_id=rid,
             rank=i + 1,
-            lineup_value=150.0 - i,
-            bench_value=40.0,
-            score=160.0 - i,
+            prev_rank=i + 1,
+            prev_record="8-6",
+            prev_pf=1500.0 + i,
             new_owner=(i == 3),
             champion=(i == 0),
         )
@@ -114,7 +114,7 @@ def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_s
     assert "Pre-season power rankings" in html
     assert "new owner" in html
     assert "&#127942;" in html  # champion trophy
-    assert "150.00" in html  # lineup value column
+    assert "#1 (8-6)" in html
 
 
 def test_render_site_draft_page(tmp_path, teams_only_season, draft_picks, players):

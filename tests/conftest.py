@@ -37,11 +37,6 @@ def draft_picks():
 
 
 @pytest.fixture
-def rosters_2026():
-    return json.loads((FIXTURES / "rosters_2026.json").read_text())
-
-
-@pytest.fixture
 def teams_only_season(rosters, users, league):
     from ffpr.compute import build_season_board, build_teams
     from ffpr.models import SeasonSummary

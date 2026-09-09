@@ -539,100 +539,42 @@ def player_dollar_value(player_id: str, players_map: dict, curve: PriceCurve) ->
     return expected_price(info.get("search_rank"), curve)
 
 
-def player_rank_value(player_id: str, players_map: dict) -> float:
-    """Draft-independent player value: inverse of Sleeper's global search_rank.
-
-    Used for pre-season rankings so they reflect roster talent alone -- not
-    this league's specific auction prices or spending. Unranked players
-    (mostly team defenses, which have no search_rank) are worth 0; that's
-    fine since every roster fields exactly one and it doesn't discriminate
-    between teams.
-    """
-    info = players_map.get(player_id) or {}
-    rank = info.get("search_rank")
-    if not rank or rank <= 0:
-        return 0.0
-    return 1000.0 / rank
-
-
-_SLOT_ELIGIBILITY = {
-    "FLEX": {"RB", "WR", "TE"},
-    "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
-    "REC_FLEX": {"WR", "TE"},
-    "WRRB_FLEX": {"RB", "WR"},
-    "IDP_FLEX": {"DL", "LB", "DB"},
-}
-
-
-def optimal_lineup_value(
-    player_ids: list[str],
-    values: dict[str, float],
-    players_map: dict,
-    roster_positions: list[str],
-) -> tuple[float, float]:
-    """(starting lineup value, bench value) for the best legal lineup, given a
-    precomputed per-player value map. Fixed-position slots are filled before
-    flex slots so each takes the best remaining eligible player.
-    """
-    valued = [
-        (values.get(pid, 0.0), (players_map.get(pid) or {}).get("position"), pid)
-        for pid in player_ids
-    ]
-    valued.sort(reverse=True)
-
-    slots = [s for s in roster_positions if s not in ("BN", "IR", "TAXI")]
-    fixed = [s for s in slots if s not in _SLOT_ELIGIBILITY]
-    flexes = [s for s in slots if s in _SLOT_ELIGIBILITY]
-
-    used: set[str] = set()
-    lineup_value = 0.0
-    for slot in fixed + flexes:
-        eligible = _SLOT_ELIGIBILITY.get(slot, {slot})
-        for value, pos, pid in valued:
-            if pid not in used and pos in eligible:
-                used.add(pid)
-                lineup_value += value
-                break
-
-    bench_value = sum(v for v, _, pid in valued if pid not in used)
-    return lineup_value, bench_value
-
-
 def build_preseason_rankings(
+    prev_final_rankings: list[PowerRankRow],
+    prev_pf_by_roster: dict[int, float],
     current_rosters: list[dict],
     prev_rosters: list[dict],
-    players_map: dict,
-    roster_positions: list[str],
     champion_roster_id: int | None,
-    bench_weight: float = 0.25,
 ) -> list[PreseasonRow]:
-    """Pre-season rankings from current roster talent alone: optimal lineup
-    value (by player_rank_value, independent of any draft) plus bench depth
-    at a quarter weight.
+    """Pre-season rankings: last season's final power-ranking order, carried
+    over by roster_id (Sleeper keeps roster ids stable across league renewals,
+    and in a keeper league the roster is the continuous entity even when the
+    owner changes). Rosters with no previous-season history rank last, in
+    roster_id order.
     """
+    current_ids = {r["roster_id"] for r in current_rosters}
     prev_owner = {r["roster_id"]: r.get("owner_id") for r in prev_rosters}
+    cur_owner = {r["roster_id"]: r.get("owner_id") for r in current_rosters}
+
+    ordered: list[tuple[int, PowerRankRow | None]] = [
+        (row.roster_id, row) for row in prev_final_rankings if row.roster_id in current_ids
+    ]
+    seen = {rid for rid, _ in ordered}
+    ordered += [(rid, None) for rid in sorted(current_ids - seen)]
+
     rows: list[PreseasonRow] = []
-    for roster in current_rosters:
-        rid = roster["roster_id"]
-        player_ids = roster.get("players") or []
-        values = {pid: player_rank_value(pid, players_map) for pid in player_ids}
-        lineup_value, bench_value = optimal_lineup_value(
-            player_ids, values, players_map, roster_positions
-        )
+    for i, (rid, prev_row) in enumerate(ordered):
         rows.append(
             PreseasonRow(
                 roster_id=rid,
-                rank=0,
-                lineup_value=lineup_value,
-                bench_value=bench_value,
-                score=lineup_value + bench_weight * bench_value,
-                new_owner=rid in prev_owner and prev_owner[rid] != roster.get("owner_id"),
+                rank=i + 1,
+                prev_rank=prev_row.rank if prev_row else None,
+                prev_record=prev_row.record if prev_row else None,
+                prev_pf=prev_pf_by_roster.get(rid) if prev_row else None,
+                new_owner=rid in prev_owner and prev_owner[rid] != cur_owner.get(rid),
                 champion=rid == champion_roster_id,
             )
         )
-    rows.sort(key=lambda r: (-r.score, -r.lineup_value, r.roster_id))
-    for i, row in enumerate(rows):
-        row.rank = i + 1
     return rows
 
 

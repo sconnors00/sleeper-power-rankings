@@ -67,14 +67,12 @@ computed.
 
 ### Pre-season rankings
 
-Before any week completes, the landing page ranks teams by current roster
-talent alone -- never by draft prices, spending, or last season's results.
-Each player is valued from Sleeper's own global `search_rank` (independent of
-this league's draft), the best legal starting lineup is filled
-superflex-aware, and bench depth counts at quarter weight. Owner changes get
-a "new owner" badge; the reigning champ gets a trophy. The table disappears
-once Week 1 is in the books. This is separate from the draft grades below,
-which *are* about auction prices.
+Before any week completes, the landing page shows pre-season power rankings:
+last season's final power-ranking order (via `previous_league_id`), carried
+over by roster -- Sleeper keeps roster ids stable across league renewals, so
+in a keeper league the roster is the continuous entity even when an owner
+changes (those get a "new owner" badge; the reigning champ gets a trophy).
+They disappear once Week 1 is in the books.
 
 ### Draft grades
 

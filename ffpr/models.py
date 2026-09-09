@@ -118,9 +118,9 @@ class SeasonBoard:
 class PreseasonRow:
     roster_id: int
     rank: int
-    lineup_value: float  # optimal starting lineup, in league auction dollars
-    bench_value: float
-    score: float  # lineup_value + bench weight -> what the ranking sorts on
+    prev_rank: int | None  # None for a roster with no history in the previous league
+    prev_record: str | None
+    prev_pf: float | None
     new_owner: bool
     champion: bool
 
