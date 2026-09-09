@@ -1,8 +1,7 @@
 # Sleeper league to build. Overridden by SLEEPER_LEAGUE_ID env var, or --league/--season CLI flags.
 league_id = "1378825622272356352"  # 2026 season
-# Update this once GitLab Pages is enabled and you know its URL for this project
-# (see README for how to find it). Used only for the link in `ffpr blurb` output.
-site_url = ""
+# Used only for the link in `ffpr blurb` output.
+site_url = "https://sconnors00.github.io/sleeper-power-rankings/"
 
 [weights]
 win_pct = 0.30
