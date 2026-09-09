@@ -118,11 +118,42 @@ class SeasonBoard:
 class PreseasonRow:
     roster_id: int
     rank: int
-    prev_rank: int | None  # None for a roster with no history in the previous league
-    prev_record: str | None
-    prev_pf: float | None
+    lineup_value: float  # optimal starting lineup, in league auction dollars
+    bench_value: float
+    score: float  # lineup_value + bench weight -> what the ranking sorts on
     new_owner: bool
     champion: bool
+
+
+@dataclass
+class DraftPickGrade:
+    pick_no: int
+    round: int
+    roster_id: int
+    player: PlayerScore  # points field unused here; name/position/team
+    amount: int
+    expected: float
+    surplus: float  # expected - amount; positive = bargain
+    is_keeper: bool
+
+
+@dataclass
+class TeamDraftGrade:
+    roster_id: int
+    grade: str
+    spent: int
+    value: float
+    surplus: float
+    picks: list[DraftPickGrade]  # this team's non-keeper picks, best surplus first
+    keepers: list[DraftPickGrade]
+
+
+@dataclass
+class DraftSummary:
+    budget: int
+    teams: list[TeamDraftGrade]  # sorted by surplus descending
+    steals: list[DraftPickGrade]  # league-wide, best surplus first
+    overpays: list[DraftPickGrade]  # league-wide, worst surplus first
 
 
 @dataclass
@@ -138,3 +169,4 @@ class SeasonSummary:
     roster_positions: list[str] = field(default_factory=list)
     provisional_week_summary: WeekSummary | None = None
     preseason: list[PreseasonRow] = field(default_factory=list)
+    draft: DraftSummary | None = None

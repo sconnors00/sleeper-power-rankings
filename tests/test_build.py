@@ -100,9 +100,9 @@ def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_s
         PreseasonRow(
             roster_id=rid,
             rank=i + 1,
-            prev_rank=i + 1,
-            prev_record="8-6",
-            prev_pf=1500.0 + i,
+            lineup_value=150.0 - i,
+            bench_value=40.0,
+            score=160.0 - i,
             new_owner=(i == 3),
             champion=(i == 0),
         )
@@ -114,4 +114,19 @@ def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_s
     assert "Pre-season power rankings" in html
     assert "new owner" in html
     assert "&#127942;" in html  # champion trophy
-    assert "#1 (8-6)" in html
+    assert "150.00" in html  # lineup value column
+
+
+def test_render_site_draft_page(tmp_path, teams_only_season, draft_picks, players):
+    from ffpr.compute import grade_draft
+
+    teams_only_season.draft = grade_draft(draft_picks, players, budget=200)
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    assert (out / "draft.html").exists()
+    html = (out / "draft.html").read_text()
+    assert "Draft grades" in html
+    assert "Biggest steals" in html
+    # every team's grade shows up
+    for team in teams_only_season.draft.teams:
+        assert teams_only_season.teams[team.roster_id].name in html

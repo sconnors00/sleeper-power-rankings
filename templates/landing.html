@@ -9,7 +9,7 @@
 {% if preseason_rows %}
 <section>
   <h2>Pre-season power rankings</h2>
-  <p class="note">Based on last season's final power rankings, carried over by roster.</p>
+  <p class="note">Roster strength in league auction dollars: each player valued off this draft's own price-vs-rank curve, best legal starting lineup plus quarter-weighted bench depth.</p>
   <div class="table-scroll">
   <table class="rankings-table">
     <thead>
@@ -17,8 +17,9 @@
         <th>#</th>
         <th></th>
         <th>Team</th>
-        <th>Last season</th>
-        <th>PF</th>
+        <th>Lineup $</th>
+        <th>Bench $</th>
+        <th>Score</th>
       </tr>
     </thead>
     <tbody>
@@ -31,8 +32,9 @@
           {% if entry.row.champion %}<span title="Reigning champion">&#127942;</span>{% endif %}
           {% if entry.row.new_owner %}<span class="badge badge-provisional">new owner</span>{% endif %}
         </td>
-        <td>{% if entry.row.prev_rank %}#{{ entry.row.prev_rank }} ({{ entry.row.prev_record }}){% else %}&mdash;{% endif %}</td>
-        <td>{{ entry.row.prev_pf | fmt2 if entry.row.prev_pf is not none else "-" }}</td>
+        <td>{{ entry.row.lineup_value | fmt2 }}</td>
+        <td>{{ entry.row.bench_value | fmt2 }}</td>
+        <td>{{ entry.row.score | fmt2 }}</td>
       </tr>
       {% endfor %}
     </tbody>

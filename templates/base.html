@@ -14,7 +14,8 @@
   </div>
   <nav class="site-nav">
     <a href="{{ asset_prefix }}index.html">Latest</a>
-    <a href="{{ asset_prefix }}season.html">Season</a>
+    {% if has_season %}<a href="{{ asset_prefix }}season.html">Season</a>{% endif %}
+    {% if has_draft %}<a href="{{ asset_prefix }}draft.html">Draft</a>{% endif %}
     {% if all_weeks %}
     <select class="week-picker" onchange="if(this.value) window.location = this.value;">
       <option value="">Jump to week&hellip;</option>

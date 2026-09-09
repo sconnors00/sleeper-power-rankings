@@ -7,6 +7,8 @@ unit tested against committed fixtures.
 from __future__ import annotations
 
 from ffpr.models import (
+    DraftPickGrade,
+    DraftSummary,
     Matchup,
     PFLeaderboardRow,
     PlayerScore,
@@ -16,6 +18,7 @@ from ffpr.models import (
     SeasonBoardEntry,
     SeasonRecords,
     Team,
+    TeamDraftGrade,
     WeekAwards,
     WeekSummary,
 )
@@ -485,43 +488,232 @@ def build_week_summaries(
     return summaries
 
 
+# --- Player valuation from the league's own auction ---
+#
+# The auction produces a market price for every drafted player. Fitting
+# expected price against Sleeper's global search_rank ("what does this league
+# pay for a player ranked around there?") gives a value function that works
+# for any player, drafted or not -- used by both the pre-season rankings and
+# the draft grades.
+
+PriceCurve = list[tuple[int, int]]  # (search_rank, amount) sorted by rank
+
+
+def fit_price_curve(picks: list[dict], players_map: dict) -> PriceCurve:
+    """(search_rank, amount) pairs from non-keeper picks, sorted by rank.
+
+    Keeper prices are set by keeper rules, not open bidding, so they'd skew
+    the market curve.
+    """
+    points: PriceCurve = []
+    for p in picks:
+        if p.get("is_keeper"):
+            continue
+        info = players_map.get(p["player_id"]) or {}
+        rank = info.get("search_rank")
+        amount = int((p.get("metadata") or {}).get("amount") or 0)
+        if rank is not None:
+            points.append((rank, amount))
+    points.sort()
+    return points
+
+
+def expected_price(rank: int | None, curve: PriceCurve, max_window: int = 15) -> float:
+    """Median auction price among the curve points nearest in rank.
+
+    The window narrows near the top of the board (down to 5 points), where
+    prices fall steeply and a wide median would drag every elite player's
+    expected price toward mid-tier money; out on the flat tail it widens to
+    `max_window`. Unknown rank (team defenses, deep stashes) is worth the
+    $1 floor.
+    """
+    if rank is None or not curve:
+        return 1.0
+    window = max(5, min(max_window, rank // 3))
+    nearest = sorted(curve, key=lambda point: abs(point[0] - rank))[:window]
+    return max(1.0, _median([float(a) for _, a in nearest]))
+
+
+def player_dollar_value(player_id: str, players_map: dict, curve: PriceCurve) -> float:
+    info = players_map.get(player_id) or {}
+    return expected_price(info.get("search_rank"), curve)
+
+
+_SLOT_ELIGIBILITY = {
+    "FLEX": {"RB", "WR", "TE"},
+    "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
+    "REC_FLEX": {"WR", "TE"},
+    "WRRB_FLEX": {"RB", "WR"},
+    "IDP_FLEX": {"DL", "LB", "DB"},
+}
+
+
+def optimal_lineup_value(
+    player_ids: list[str],
+    players_map: dict,
+    curve: PriceCurve,
+    roster_positions: list[str],
+) -> tuple[float, float]:
+    """(starting lineup value, bench value) for the best legal lineup.
+
+    Fixed-position slots are filled before flex slots so each takes the best
+    remaining eligible player.
+    """
+    valued = [
+        (
+            player_dollar_value(pid, players_map, curve),
+            (players_map.get(pid) or {}).get("position"),
+            pid,
+        )
+        for pid in player_ids
+    ]
+    valued.sort(reverse=True)
+
+    slots = [s for s in roster_positions if s not in ("BN", "IR", "TAXI")]
+    fixed = [s for s in slots if s not in _SLOT_ELIGIBILITY]
+    flexes = [s for s in slots if s in _SLOT_ELIGIBILITY]
+
+    used: set[str] = set()
+    lineup_value = 0.0
+    for slot in fixed + flexes:
+        eligible = _SLOT_ELIGIBILITY.get(slot, {slot})
+        for value, pos, pid in valued:
+            if pid not in used and pos in eligible:
+                used.add(pid)
+                lineup_value += value
+                break
+
+    bench_value = sum(v for v, _, pid in valued if pid not in used)
+    return lineup_value, bench_value
+
+
 def build_preseason_rankings(
-    prev_final_rankings: list[PowerRankRow],
-    prev_pf_by_roster: dict[int, float],
     current_rosters: list[dict],
     prev_rosters: list[dict],
+    players_map: dict,
+    curve: PriceCurve,
+    roster_positions: list[str],
     champion_roster_id: int | None,
+    bench_weight: float = 0.25,
 ) -> list[PreseasonRow]:
-    """Pre-season rankings: last season's final power-ranking order, carried
-    over by roster_id (Sleeper keeps roster ids stable across league renewals,
-    and in a keeper league the roster is the continuous entity even when the
-    owner changes). Rosters with no previous-season history rank last, in
-    roster_id order.
+    """Pre-season rankings from current roster strength: optimal lineup value
+    plus bench depth at a quarter weight, in league auction dollars.
     """
-    current_ids = {r["roster_id"] for r in current_rosters}
     prev_owner = {r["roster_id"]: r.get("owner_id") for r in prev_rosters}
-    cur_owner = {r["roster_id"]: r.get("owner_id") for r in current_rosters}
-
-    ordered: list[tuple[int, PowerRankRow | None]] = [
-        (row.roster_id, row) for row in prev_final_rankings if row.roster_id in current_ids
-    ]
-    seen = {rid for rid, _ in ordered}
-    ordered += [(rid, None) for rid in sorted(current_ids - seen)]
-
     rows: list[PreseasonRow] = []
-    for i, (rid, prev_row) in enumerate(ordered):
+    for roster in current_rosters:
+        rid = roster["roster_id"]
+        lineup_value, bench_value = optimal_lineup_value(
+            roster.get("players") or [], players_map, curve, roster_positions
+        )
         rows.append(
             PreseasonRow(
                 roster_id=rid,
-                rank=i + 1,
-                prev_rank=prev_row.rank if prev_row else None,
-                prev_record=prev_row.record if prev_row else None,
-                prev_pf=prev_pf_by_roster.get(rid) if prev_row else None,
-                new_owner=rid in prev_owner and prev_owner[rid] != cur_owner.get(rid),
+                rank=0,
+                lineup_value=lineup_value,
+                bench_value=bench_value,
+                score=lineup_value + bench_weight * bench_value,
+                new_owner=rid in prev_owner and prev_owner[rid] != roster.get("owner_id"),
                 champion=rid == champion_roster_id,
             )
         )
+    rows.sort(key=lambda r: (-r.score, -r.lineup_value, r.roster_id))
+    for i, row in enumerate(rows):
+        row.rank = i + 1
     return rows
+
+
+_GRADE_STEPS = [
+    (1.5, "A+"),
+    (1.0, "A"),
+    (0.5, "A-"),
+    (0.15, "B+"),
+    (-0.15, "B"),
+    (-0.5, "B-"),
+    (-1.0, "C+"),
+    (-1.5, "C"),
+]
+
+
+def _letter_grade(z: float) -> str:
+    for threshold, letter in _GRADE_STEPS:
+        if z >= threshold:
+            return letter
+    return "D"
+
+
+def grade_draft(
+    picks: list[dict],
+    players_map: dict,
+    budget: int,
+    steal_count: int = 10,
+    min_overpay_amount: int = 5,
+) -> DraftSummary:
+    """Auction draft grades: each pick's surplus is its market value (from the
+    league's own price curve) minus what was paid. Keepers are listed but
+    excluded from grading -- their prices come from keeper rules, not bidding.
+    Team letter grades come from the z-score of total surplus.
+    """
+    curve = fit_price_curve(picks, players_map)
+
+    graded: list[DraftPickGrade] = []
+    for p in picks:
+        pid = p["player_id"]
+        amount = int((p.get("metadata") or {}).get("amount") or 0)
+        expected = player_dollar_value(pid, players_map, curve)
+        graded.append(
+            DraftPickGrade(
+                pick_no=p["pick_no"],
+                round=p["round"],
+                roster_id=p["roster_id"],
+                player=_player_score(pid, 0.0, players_map),
+                amount=amount,
+                expected=expected,
+                surplus=expected - amount,
+                is_keeper=bool(p.get("is_keeper")),
+            )
+        )
+
+    by_roster: dict[int, list[DraftPickGrade]] = {}
+    for g in graded:
+        by_roster.setdefault(g.roster_id, []).append(g)
+
+    team_rows = []
+    for rid, team_picks in by_roster.items():
+        open_picks = [g for g in team_picks if not g.is_keeper]
+        keepers = [g for g in team_picks if g.is_keeper]
+        open_picks.sort(key=lambda g: -g.surplus)
+        team_rows.append(
+            TeamDraftGrade(
+                roster_id=rid,
+                grade="",
+                spent=sum(g.amount for g in open_picks),
+                value=sum(g.expected for g in open_picks),
+                surplus=sum(g.surplus for g in open_picks),
+                picks=open_picks,
+                keepers=keepers,
+            )
+        )
+
+    surpluses = [t.surplus for t in team_rows]
+    mean = sum(surpluses) / len(surpluses) if surpluses else 0.0
+    variance = sum((s - mean) ** 2 for s in surpluses) / len(surpluses) if surpluses else 0.0
+    std = variance**0.5
+    for t in team_rows:
+        z = (t.surplus - mean) / std if std > 0 else 0.0
+        t.grade = _letter_grade(z)
+    team_rows.sort(key=lambda t: -t.surplus)
+
+    open_graded = [g for g in graded if not g.is_keeper]
+    steals = sorted((g for g in open_graded if g.surplus > 0), key=lambda g: -g.surplus)[
+        :steal_count
+    ]
+    overpays = sorted(
+        (g for g in open_graded if g.surplus < 0 and g.amount >= min_overpay_amount),
+        key=lambda g: g.surplus,
+    )[:steal_count]
+
+    return DraftSummary(budget=budget, teams=team_rows, steals=steals, overpays=overpays)
 
 
 def official_record_string(roster: dict) -> str:

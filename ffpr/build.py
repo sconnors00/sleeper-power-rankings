@@ -252,9 +252,21 @@ def render_site(season: SeasonSummary, output_dir: Path, site_url: str = "") -> 
         "chart_js_sri": CHART_JS_SRI,
         "league_name": season.league_name,
         "season_year": season.season,
+        "has_draft": season.draft is not None,
+        "has_season": bool(season.weeks),
     }
 
     week_template = env.get_template("week.html")
+
+    if season.draft is not None:
+        draft_template = env.get_template("draft.html")
+        draft_html = draft_template.render(
+            **common,
+            draft=season.draft,
+            teams=season.teams,
+            asset_prefix="",
+        )
+        (output_dir / "draft.html").write_text(draft_html)
 
     if not season.weeks:
         template = env.get_template("landing.html")

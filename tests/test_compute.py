@@ -202,61 +202,89 @@ def test_build_week_summaries_movement_present_on_second_week(rosters, matchups_
     assert all(row.movement is not None for row in weeks[1].power_rankings)
 
 
-def test_build_preseason_rankings_carries_over_final_order(rosters, matchups_week5, players):
-    from ffpr.compute import build_preseason_rankings
+def test_fit_price_curve_excludes_keepers_and_sorts(draft_picks, players):
+    from ffpr.compute import fit_price_curve
 
-    rosters_by_id = {r["roster_id"]: r for r in rosters}
-    roster_ids = [r["roster_id"] for r in rosters]
-    weeks = build_week_summaries(
-        roster_ids,
-        {5: matchups_week5},
-        rosters_by_id,
-        players,
-        league_average_match=True,
-        weights=WEIGHTS,
-        form_window=3,
+    curve = fit_price_curve(draft_picks, players)
+    keeper_count = sum(1 for p in draft_picks if p.get("is_keeper"))
+    unranked = sum(
+        1
+        for p in draft_picks
+        if not p.get("is_keeper") and (players.get(p["player_id"]) or {}).get("search_rank") is None
     )
-    final = weeks[-1].power_rankings
-    pf = {r["roster_id"]: 1000.0 + r["roster_id"] for r in rosters}
+    assert len(curve) == len(draft_picks) - keeper_count - unranked
+    ranks = [r for r, _ in curve]
+    assert ranks == sorted(ranks)
 
-    # same rosters, but roster 8's owner changed hands
-    current = [dict(r) for r in rosters]
-    for r in current:
-        if r["roster_id"] == 8:
-            r["owner_id"] = "brand-new-owner"
 
+def test_expected_price_tracks_market(draft_picks, players):
+    from ffpr.compute import expected_price, fit_price_curve
+
+    curve = fit_price_curve(draft_picks, players)
+    top = expected_price(1, curve)
+    mid = expected_price(80, curve)
+    deep = expected_price(400, curve)
+    assert top > mid >= deep >= 1.0
+    assert expected_price(None, curve) == 1.0  # team defenses etc.
+
+
+def test_optimal_lineup_value_superflex_takes_second_qb():
+    from ffpr.compute import optimal_lineup_value
+
+    players_map = {
+        "qb1": {"position": "QB", "search_rank": 1},
+        "qb2": {"position": "QB", "search_rank": 2},
+        "rb1": {"position": "RB", "search_rank": 3},
+        "wr1": {"position": "WR", "search_rank": 4},
+    }
+    curve = [(1, 60), (2, 50), (3, 40), (4, 30)]
+    lineup, bench = optimal_lineup_value(
+        ["qb1", "qb2", "rb1", "wr1"], players_map, curve, ["QB", "RB", "WR", "SUPER_FLEX", "BN"]
+    )
+    # window median over 4 points is the same for all -> every player worth
+    # the same; the point is that all four fill slots (QB, RB, WR, SF=2nd QB)
+    assert bench == 0.0
+    assert lineup > 0.0
+
+
+def test_build_preseason_rankings_from_roster_strength(rosters_2026, draft_picks, players, league):
+    from ffpr.compute import build_preseason_rankings, fit_price_curve
+
+    curve = fit_price_curve(draft_picks, players)
     rows = build_preseason_rankings(
-        final, pf, current, rosters, champion_roster_id=final[0].roster_id
-    )
-    assert [r.roster_id for r in rows] == [r.roster_id for r in final]
-    assert [r.rank for r in rows] == list(range(1, 13))
-    assert rows[0].champion and not rows[1].champion
-    by_rid = {r.roster_id: r for r in rows}
-    assert by_rid[8].new_owner
-    assert sum(1 for r in rows if r.new_owner) == 1
-    assert by_rid[8].prev_pf == pf[8]
-
-
-def test_build_preseason_rankings_unknown_roster_ranks_last(rosters, matchups_week5, players):
-    from ffpr.compute import build_preseason_rankings
-
-    rosters_by_id = {r["roster_id"]: r for r in rosters}
-    roster_ids = [r["roster_id"] for r in rosters]
-    weeks = build_week_summaries(
-        roster_ids,
-        {5: matchups_week5},
-        rosters_by_id,
+        rosters_2026,
+        rosters_2026,  # same owners -> no new_owner flags
         players,
-        league_average_match=True,
-        weights=WEIGHTS,
-        form_window=3,
+        curve,
+        league["roster_positions"],
+        champion_roster_id=1,
     )
-    final = weeks[-1].power_rankings
-    current = [dict(r) for r in rosters] + [{"roster_id": 99, "owner_id": "someone"}]
-    rows = build_preseason_rankings(final, {}, current, rosters, champion_roster_id=None)
-    assert rows[-1].roster_id == 99
-    assert rows[-1].prev_rank is None
-    assert rows[-1].rank == 13
+    assert len(rows) == 12
+    assert [r.rank for r in rows] == list(range(1, 13))
+    scores = [r.score for r in rows]
+    assert scores == sorted(scores, reverse=True)
+    assert all(r.lineup_value > 0 for r in rows)
+    assert not any(r.new_owner for r in rows)
+    assert sum(1 for r in rows if r.champion) == 1
+
+
+def test_grade_draft_produces_grades_and_steals(draft_picks, players):
+    from ffpr.compute import grade_draft
+
+    summary = grade_draft(draft_picks, players, budget=200)
+    assert len(summary.teams) == 12
+    assert summary.budget == 200
+    # sorted by surplus, grades ordered A-side to C/D-side
+    surpluses = [t.surplus for t in summary.teams]
+    assert surpluses == sorted(surpluses, reverse=True)
+    assert summary.teams[0].grade.startswith("A")
+    # keepers never graded or listed as steals/overpays
+    for t in summary.teams:
+        assert all(not g.is_keeper for g in t.picks)
+        assert all(g.is_keeper for g in t.keepers)
+    assert all(not g.is_keeper for g in summary.steals + summary.overpays)
+    assert all(g.surplus > 0 for g in summary.steals)
+    assert all(g.surplus < 0 and g.amount >= 5 for g in summary.overpays)
 
 
 def test_build_season_board_crowns_and_pf_leaderboard(rosters, matchups_week5, players):
