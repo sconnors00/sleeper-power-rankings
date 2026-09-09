@@ -24,6 +24,14 @@
       {% endfor %}
     </select>
     {% endif %}
+    {% if all_seasons | length > 1 %}
+    <select class="week-picker" onchange="if(this.value) window.location = this.value;">
+      <option value="">Season&hellip;</option>
+      {% for y in all_seasons %}
+      <option value="{{ asset_prefix }}{{ site_root_prefix }}{{ year_url(y) }}" {% if y == season_year %}selected{% endif %}>{{ y }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
   </nav>
 </header>
 <main class="site-main">

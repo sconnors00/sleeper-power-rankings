@@ -151,6 +151,24 @@ def _build_preseason(
     )
 
 
+def _walk_previous_league_ids(client: SleeperClient, league_obj: dict) -> list[str]:
+    """Every earlier league_id in the renewal chain, most recent first.
+
+    Best-effort: stops (rather than fails the whole build) the moment a
+    league in the chain can't be fetched.
+    """
+    ids: list[str] = []
+    prev_id = league_obj.get("previous_league_id")
+    while prev_id:
+        ids.append(prev_id)
+        try:
+            prev_league = client.get_league(prev_id)
+        except (SleeperError, httpx.HTTPError):
+            break
+        prev_id = prev_league.get("previous_league_id")
+    return ids
+
+
 def _build_season_summary(
     client: SleeperClient,
     league_id: str,
@@ -271,11 +289,34 @@ def build(
         season_summary = _build_season_summary(
             client, league_id, season, through, provisional, weights, form_window
         )
+        league_obj = client.get_league(league_id)
+        past_summaries = []
+        for past_id in _walk_previous_league_ids(client, league_obj):
+            try:
+                past_summaries.append(
+                    _build_season_summary(client, past_id, None, None, False, weights, form_window)
+                )
+            except (SleeperError, httpx.HTTPError):
+                continue
 
-    render_site(season_summary, SITE_DIR, site_url=site_url)
+    all_summaries = [season_summary, *past_summaries]
+    all_seasons = [s.season for s in all_summaries]
+
+    render_site(season_summary, SITE_DIR, site_url=site_url, all_seasons=all_seasons)
+    for s in all_summaries:
+        render_site(
+            s,
+            SITE_DIR / s.season,
+            site_url=site_url,
+            all_seasons=all_seasons,
+            site_root_prefix="../",
+        )
+
     msg = f"Built site/ through week {season_summary.through_week}"
     if season_summary.provisional_week:
         msg += f" (+ provisional week {season_summary.provisional_week})"
+    if past_summaries:
+        msg += f", plus {len(past_summaries)} past season(s)"
     typer.echo(msg)
 
 

@@ -37,6 +37,10 @@ def _week_url(week: int) -> str:
     return f"weeks/week-{week}.html"
 
 
+def _year_url(year: str) -> str:
+    return f"{year}/index.html"
+
+
 def build_data_js(season: SeasonSummary) -> str:
     """Serialize everything the charts need into window.FFPR = {...}."""
     teams = {
@@ -235,7 +239,23 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
     }
 
 
-def render_site(season: SeasonSummary, output_dir: Path, site_url: str = "") -> None:
+def render_site(
+    season: SeasonSummary,
+    output_dir: Path,
+    site_url: str = "",
+    all_seasons: list[str] | None = None,
+    site_root_prefix: str = "",
+) -> None:
+    """Render one season's site into output_dir.
+
+    For a multi-season build, call this once per season with output_dir set
+    to a per-season subdirectory (plus once more at the true site root for
+    whichever season should be the default landing page). `all_seasons` (every
+    built season, for the year switcher in the nav) and `site_root_prefix`
+    (this season's relative path back to the site root, "" if this call's
+    output_dir *is* the site root) stay the same across all those calls
+    except for site_root_prefix, which is "" only for the root call.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
     weeks_dir = output_dir / "weeks"
     weeks_dir.mkdir(parents=True, exist_ok=True)
@@ -256,6 +276,9 @@ def render_site(season: SeasonSummary, output_dir: Path, site_url: str = "") -> 
         "season_year": season.season,
         "has_draft": season.draft is not None,
         "has_season": bool(season.weeks),
+        "all_seasons": all_seasons or [season.season],
+        "site_root_prefix": site_root_prefix,
+        "year_url": _year_url,
     }
 
     week_template = env.get_template("week.html")

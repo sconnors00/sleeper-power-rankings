@@ -91,6 +91,17 @@ log for that week (waivers with the FAAB bid, free agent pickups, trades).
 Failed transactions (an outbid claim, a vetoed trade) never happened, so
 they're excluded.
 
+### Past seasons
+
+`ffpr build` always walks the league's `previous_league_id` chain and builds
+every past season too, each into its own `site/<year>/` (fully
+self-contained: own `data.js`, own `static/`), alongside the current season
+at `site/` root. Every page gets a "Season" dropdown next to the week picker
+for jumping between years. Past seasons build with their own draft grades
+(if that season had a completed auction) but never pre-season rankings or a
+provisional week -- those only make sense for the current, in-progress
+season.
+
 ## Weekly flow
 
 A GitHub Actions schedule rebuilds and republishes the site every Tuesday
