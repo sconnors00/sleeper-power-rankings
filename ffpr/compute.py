@@ -9,6 +9,7 @@ from __future__ import annotations
 from ffpr.models import (
     DraftPickGrade,
     DraftSummary,
+    GameRecord,
     Matchup,
     PFLeaderboardRow,
     PlayerMove,
@@ -761,6 +762,23 @@ def build_provisional_week_summary(
     )
 
 
+def _game_record(
+    by_matchup_id: dict[int, list[Matchup]], week: int, matchup_id: int, margin: float
+) -> GameRecord | None:
+    pair = by_matchup_id.get(matchup_id)
+    if not pair or len(pair) != 2:
+        return None
+    a, b = pair
+    return GameRecord(
+        week=week,
+        roster_a=a.roster_id,
+        points_a=a.team_points,
+        roster_b=b.roster_id,
+        points_b=b.team_points,
+        margin=margin,
+    )
+
+
 def build_season_board(weeks: list[WeekSummary], teams: dict[int, Team]) -> SeasonBoard:
     log: list[SeasonBoardEntry] = []
     crown_counts: dict[int, int] = dict.fromkeys(teams, 0)
@@ -773,10 +791,42 @@ def build_season_board(weeks: list[WeekSummary], teams: dict[int, Team]) -> Seas
     lowest_team: tuple[list[int], int, float] = ([], 0, float("inf"))
     highest_starter: tuple[list[tuple[int, PlayerScore]], int] = ([], 0)
     highest_starter_pts = float("-inf")
+    lowest_starter: tuple[list[tuple[int, PlayerScore]], int] = ([], 0)
+    lowest_starter_pts = float("inf")
     highest_bench: tuple[list[tuple[int, PlayerScore]], int] = ([], 0)
     highest_bench_pts = float("-inf")
+    closest_games: list[GameRecord] = []
+    closest_margin = float("inf")
+    biggest_blowouts: list[GameRecord] = []
+    biggest_blowout_margin = float("-inf")
 
     for wk in weeks:
+        by_matchup_id: dict[int, list[Matchup]] = {}
+        for m in wk.matchups:
+            by_matchup_id.setdefault(m.matchup_id, []).append(m)
+
+        if wk.awards.closest_matchup_ids:
+            if wk.awards.closest_margin < closest_margin:
+                closest_margin = wk.awards.closest_margin
+                closest_games = []
+            if wk.awards.closest_margin == closest_margin:
+                closest_games.extend(
+                    g
+                    for mid in wk.awards.closest_matchup_ids
+                    if (g := _game_record(by_matchup_id, wk.week, mid, closest_margin)) is not None
+                )
+        if wk.awards.biggest_blowout_matchup_ids:
+            if wk.awards.biggest_blowout_margin > biggest_blowout_margin:
+                biggest_blowout_margin = wk.awards.biggest_blowout_margin
+                biggest_blowouts = []
+            if wk.awards.biggest_blowout_margin == biggest_blowout_margin:
+                biggest_blowouts.extend(
+                    g
+                    for mid in wk.awards.biggest_blowout_matchup_ids
+                    if (g := _game_record(by_matchup_id, wk.week, mid, biggest_blowout_margin))
+                    is not None
+                )
+
         top_ids = wk.awards.highest_score_roster_ids
         top_score = wk.awards.highest_score
         log.append(
@@ -811,6 +861,11 @@ def build_season_board(weeks: list[WeekSummary], teams: dict[int, Team]) -> Seas
                     highest_starter = ([(m.roster_id, p)], wk.week)
                 elif p.points == highest_starter_pts:
                     highest_starter = (highest_starter[0] + [(m.roster_id, p)], wk.week)
+                if p.points < lowest_starter_pts:
+                    lowest_starter_pts = p.points
+                    lowest_starter = ([(m.roster_id, p)], wk.week)
+                elif p.points == lowest_starter_pts:
+                    lowest_starter = (lowest_starter[0] + [(m.roster_id, p)], wk.week)
             for p in m.bench:
                 if p.points > highest_bench_pts:
                     highest_bench_pts = p.points
@@ -844,7 +899,10 @@ def build_season_board(weeks: list[WeekSummary], teams: dict[int, Team]) -> Seas
         highest_team_score=highest_team,
         lowest_team_score=lowest_team if weeks else ([], 0, 0.0),
         highest_starter=highest_starter,
+        lowest_starter=lowest_starter,
         highest_bench_player=highest_bench,
+        closest_games=closest_games,
+        biggest_blowouts=biggest_blowouts,
     )
 
     return SeasonBoard(

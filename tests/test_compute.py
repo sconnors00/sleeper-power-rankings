@@ -364,3 +364,39 @@ def test_build_season_board_crowns_and_pf_leaderboard(rosters, matchups_week5, p
     assert pf_sorted == sorted(pf_sorted, reverse=True)
     for row in board.pf_leaderboard:
         assert row.avg == row.pf  # only one week of data, so avg == total
+
+
+def test_build_season_board_records_span_full_season(rosters, matchups_week5, players):
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    roster_ids = [r["roster_id"] for r in rosters]
+    teams = build_teams(rosters, [])
+    # reuse week 5's data as a stand-in week 6 so records have two weeks to
+    # actually span, exercising the season-wide (not just per-week) tracking
+    weeks = build_week_summaries(
+        roster_ids,
+        {5: matchups_week5, 6: matchups_week5},
+        {},
+        rosters_by_id,
+        players,
+        league_average_match=True,
+        weights=WEIGHTS,
+        form_window=3,
+    )
+    board = build_season_board(weeks, teams)
+    records = board.records
+
+    all_starter_points = [p.points for wk in weeks for m in wk.matchups for p in m.starters]
+    assert records.highest_starter[0][0][1].points == max(all_starter_points)
+    assert records.lowest_starter[0][0][1].points == min(all_starter_points)
+
+    all_team_points = [m.team_points for wk in weeks for m in wk.matchups]
+    assert records.highest_team_score[2] == max(all_team_points)
+    assert records.lowest_team_score[2] == min(all_team_points)
+
+    # every closest/blowout game record actually has that season's margin
+    assert all(g.margin == records.closest_games[0].margin for g in records.closest_games)
+    assert all(g.margin == records.biggest_blowouts[0].margin for g in records.biggest_blowouts)
+    # closest margin is never worse (bigger) than the blowout margin
+    assert records.closest_games[0].margin <= records.biggest_blowouts[0].margin
+    for g in records.closest_games + records.biggest_blowouts:
+        assert round(g.margin, 6) == round(abs(g.points_a - g.points_b), 6)

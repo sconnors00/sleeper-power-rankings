@@ -20,7 +20,7 @@
     <select class="week-picker" onchange="if(this.value) window.location = this.value;">
       <option value="">Jump to week&hellip;</option>
       {% for w in all_weeks %}
-      <option value="{{ asset_prefix }}{{ week_url(w) }}">Week {{ w }}</option>
+      <option value="{{ asset_prefix }}{{ week_url(w) }}">{% if w == 0 %}Preseason{% elif w == recap_week %}Season recap{% else %}Week {{ w }}{% endif %}</option>
       {% endfor %}
     </select>
     {% endif %}

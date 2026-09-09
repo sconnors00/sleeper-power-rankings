@@ -114,11 +114,24 @@ class PFLeaderboardRow:
 
 
 @dataclass
+class GameRecord:
+    week: int
+    roster_a: int
+    points_a: float
+    roster_b: int
+    points_b: float
+    margin: float
+
+
+@dataclass
 class SeasonRecords:
     highest_team_score: tuple[list[int], int, float]  # (roster_ids, week, score)
     lowest_team_score: tuple[list[int], int, float]
     highest_starter: tuple[list[tuple[int, PlayerScore]], int]  # (roster/player pairs, week)
+    lowest_starter: tuple[list[tuple[int, PlayerScore]], int]
     highest_bench_player: tuple[list[tuple[int, PlayerScore]], int]
+    closest_games: list[GameRecord]  # every game tied at the season's smallest margin
+    biggest_blowouts: list[GameRecord]  # every game tied at the season's largest margin
 
 
 @dataclass

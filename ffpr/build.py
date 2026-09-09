@@ -164,10 +164,18 @@ def _matchup_pair(wk, matchup_id: int, teams: dict) -> list[dict]:
     return [{"team": teams[m.roster_id], "points": m.team_points} for m in pair]
 
 
+def _season_is_complete(season: SeasonSummary) -> bool:
+    return bool(season.weeks) and season.through_week >= season.playoff_week_start - 1
+
+
 def _all_week_numbers(season: SeasonSummary) -> list[int]:
     weeks = [w.week for w in season.weeks]
     if season.provisional_week_summary is not None:
         weeks = weeks + [season.provisional_week_summary.week]
+    if season.preseason:
+        weeks = [0, *weeks]
+    if _season_is_complete(season):
+        weeks = [*weeks, season.playoff_week_start]
     return weeks
 
 
@@ -231,8 +239,6 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
         "worst_starter": [(teams[rid], p) for rid, p in awards.worst_starter],
         "asset_prefix": asset_prefix,
         "is_index": is_index,
-        "all_weeks": _all_week_numbers(season),
-        "week_url": _week_url,
         "playoff": wk.week >= season.playoff_week_start,
         "provisional": wk.week == season.provisional_week,
         "rankings_frozen": rankings_frozen,
@@ -279,9 +285,13 @@ def render_site(
         "all_seasons": all_seasons or [season.season],
         "site_root_prefix": site_root_prefix,
         "year_url": _year_url,
+        "recap_week": season.playoff_week_start,
+        "all_weeks": _all_week_numbers(season),
+        "week_url": _week_url,
     }
 
     week_template = env.get_template("week.html")
+    preseason_rows = [{"row": row, "team": season.teams[row.roster_id]} for row in season.preseason]
 
     if season.draft is not None:
         draft_template = env.get_template("draft.html")
@@ -293,11 +303,20 @@ def render_site(
         )
         (output_dir / "draft.html").write_text(draft_html)
 
+    if season.preseason:
+        week0_template = env.get_template("week0.html")
+        html = week0_template.render(**common, asset_prefix="../", preseason_rows=preseason_rows)
+        (weeks_dir / "week-0.html").write_text(html)
+
+    if _season_is_complete(season):
+        recap_template = env.get_template("season_recap.html")
+        html = recap_template.render(
+            **common, asset_prefix="../", teams=season.teams, records=season.season_board.records
+        )
+        (weeks_dir / f"week-{season.playoff_week_start}.html").write_text(html)
+
     if not season.weeks:
         template = env.get_template("landing.html")
-        preseason_rows = [
-            {"row": row, "team": season.teams[row.roster_id]} for row in season.preseason
-        ]
         html = template.render(**common, asset_prefix="", preseason_rows=preseason_rows)
         (output_dir / "index.html").write_text(html)
         if season.provisional_week_summary is not None:
@@ -332,7 +351,5 @@ def render_site(
         teams=season.teams,
         board=season.season_board,
         asset_prefix="",
-        all_weeks=_all_week_numbers(season),
-        week_url=_week_url,
     )
     (output_dir / "season.html").write_text(season_html)

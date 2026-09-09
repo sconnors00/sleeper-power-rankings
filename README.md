@@ -65,14 +65,16 @@ window = 3
 (`sleeper-power-rankings-prompt.md`) for exactly how each component is
 computed.
 
-### Pre-season rankings
+### Pre-season rankings ("Week 0")
 
-Before any week completes, the landing page shows pre-season power rankings:
-last season's final power-ranking order (via `previous_league_id`), carried
-over by roster -- Sleeper keeps roster ids stable across league renewals, so
-in a keeper league the roster is the continuous entity even when an owner
-changes (those get a "new owner" badge; the reigning champ gets a trophy).
-They disappear once Week 1 is in the books.
+Pre-season power rankings -- last season's final power-ranking order (via
+`previous_league_id`), carried over by roster -- always live at
+`weeks/week-0.html` ("Preseason" in the week dropdown), from before Week 1
+through the rest of the season, not just during the offseason. Before any
+week completes it's also the site's landing page. Sleeper keeps roster ids
+stable across league renewals, so in a keeper league the roster is the
+continuous entity even when an owner changes (those get a "new owner"
+badge; the reigning champ gets a trophy).
 
 ### Draft grades
 
@@ -90,6 +92,15 @@ every team's adds and drops that week, sourced from Sleeper's transactions
 log for that week (waivers with the FAAB bid, free agent pickups, trades).
 Failed transactions (an outbid claim, a vetoed trade) never happened, so
 they're excluded.
+
+### Season recap ("Week N+1")
+
+Once the regular season is fully built, a recap page appears one week past
+the last regular-season week (`weeks/week-<playoff_week_start>.html`,
+"Season recap" in the dropdown -- week 15 for a 14-week regular season):
+highest/lowest scoring team, highest/lowest scoring active (starting) player,
+highest bench player, and the season's closest game and biggest blowout.
+Regular season only.
 
 ### Past seasons
 

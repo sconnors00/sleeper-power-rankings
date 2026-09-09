@@ -247,9 +247,9 @@ def _build_season_summary(
         draft, picks = draft_data
         draft_summary = grade_draft(picks, players, draft.get("settings", {}).get("budget", 0))
 
-    preseason: list[PreseasonRow] = []
-    if through_week == 0:
-        preseason = _build_preseason(client, league_obj, rosters, players, weights, form_window)
+    # Always attempted -- week 0 stays reachable as a historical page even
+    # after the season starts, not just while there are no completed weeks.
+    preseason = _build_preseason(client, league_obj, rosters, players, weights, form_window)
 
     return SeasonSummary(
         season=season,

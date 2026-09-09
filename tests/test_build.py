@@ -97,11 +97,11 @@ def test_render_site_landing_page_when_no_completed_weeks(tmp_path, teams_only_s
     assert "Pre-season power rankings" not in html  # no preseason data -> no table
 
 
-def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_season):
+def _make_preseason_rows(teams_only_season):
     from ffpr.models import PreseasonRow
 
     rids = sorted(teams_only_season.teams)
-    teams_only_season.preseason = [
+    return [
         PreseasonRow(
             roster_id=rid,
             rank=i + 1,
@@ -113,6 +113,10 @@ def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_s
         )
         for i, rid in enumerate(rids)
     ]
+
+
+def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_season):
+    teams_only_season.preseason = _make_preseason_rows(teams_only_season)
     out = tmp_path / "site"
     render_site(teams_only_season, out)
     html = (out / "index.html").read_text()
@@ -120,6 +124,52 @@ def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_s
     assert "new owner" in html
     assert "&#127942;" in html  # champion trophy
     assert "#1 (8-6)" in html
+
+
+def test_render_site_writes_week0_when_preseason_present(tmp_path, teams_only_season):
+    teams_only_season.preseason = _make_preseason_rows(teams_only_season)
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    assert (out / "weeks" / "week-0.html").exists()
+    html = (out / "weeks" / "week-0.html").read_text()
+    assert "Pre-season power rankings" in html
+    assert '<option value="../weeks/week-0.html">Preseason</option>' in html
+
+
+def test_render_site_no_week0_without_preseason_data(tmp_path, teams_only_season):
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    assert not (out / "weeks" / "week-0.html").exists()
+
+
+def test_render_site_writes_season_recap_when_complete(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    # pretend the regular season (up through this league's real
+    # playoff_week_start) is fully built, using week 5's data as a stand-in
+    season.playoff_week_start = 6
+    season.through_week = 5
+    out = tmp_path / "site"
+    render_site(season, out)
+    assert (out / "weeks" / "week-6.html").exists()
+    html = (out / "weeks" / "week-6.html").read_text()
+    assert "Season recap" in html
+    assert "Highest scoring team" in html
+    assert "Lowest scoring active player" in html
+    assert "Closest game of the year" in html
+    assert "Biggest blowout of the year" in html
+    assert '<option value="../weeks/week-6.html">Season recap</option>' in html
+
+
+def test_render_site_no_season_recap_when_incomplete(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    # league fixture's real playoff_week_start (15) is far beyond week 5
+    out = tmp_path / "site"
+    render_site(season, out)
+    assert not (out / "weeks" / f"week-{season.playoff_week_start}.html").exists()
 
 
 def test_render_site_draft_page(tmp_path, teams_only_season, draft_picks, players):

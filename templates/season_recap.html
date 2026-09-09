@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Season recap &middot; {{ league_name }}{% endblock %}
+{% block content %}
+<h1 class="page-title">Season recap</h1>
+<p class="note">The season's highs and lows, regular season only.</p>
+
+<section class="awards-grid">
+  <div class="award-card award-good">
+    <h3>Highest scoring team</h3>
+    <p class="award-value">{{ records.highest_team_score[2] | fmt2 }}</p>
+    <p class="award-teams">{% for rid in records.highest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ records.highest_team_score[1] }})</p>
+  </div>
+  <div class="award-card award-bad">
+    <h3>Lowest scoring team</h3>
+    <p class="award-value">{{ records.lowest_team_score[2] | fmt2 }}</p>
+    <p class="award-teams">{% for rid in records.lowest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ records.lowest_team_score[1] }})</p>
+  </div>
+  <div class="award-card award-good">
+    <h3>Highest scoring active player</h3>
+    {% set pairs, wk = records.highest_starter %}
+    <p class="award-value">{% if pairs %}{{ pairs[0][1].points | fmt2 }}{% endif %}</p>
+    <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
+  </div>
+  <div class="award-card award-bad">
+    <h3>Lowest scoring active player</h3>
+    {% set pairs, wk = records.lowest_starter %}
+    <p class="award-value">{% if pairs %}{{ pairs[0][1].points | fmt2 }}{% endif %}</p>
+    <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
+  </div>
+  <div class="award-card">
+    <h3>Highest bench player</h3>
+    {% set pairs, wk = records.highest_bench_player %}
+    <p class="award-value">{% if pairs %}{{ pairs[0][1].points | fmt2 }}{% endif %}</p>
+    <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
+  </div>
+  <div class="award-card">
+    <h3>Closest game of the year</h3>
+    <p class="award-value">{{ records.closest_games[0].margin | fmt2 if records.closest_games else "-" }}</p>
+    {% for g in records.closest_games %}
+    <p class="award-teams">{{ teams[g.roster_a].name }} {{ g.points_a | fmt2 }} &ndash; {{ teams[g.roster_b].name }} {{ g.points_b | fmt2 }} (Wk {{ g.week }})</p>
+    {% endfor %}
+  </div>
+  <div class="award-card">
+    <h3>Biggest blowout of the year</h3>
+    <p class="award-value">{{ records.biggest_blowouts[0].margin | fmt2 if records.biggest_blowouts else "-" }}</p>
+    {% for g in records.biggest_blowouts %}
+    <p class="award-teams">{{ teams[g.roster_a].name }} {{ g.points_a | fmt2 }} &ndash; {{ teams[g.roster_b].name }} {{ g.points_b | fmt2 }} (Wk {{ g.week }})</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
