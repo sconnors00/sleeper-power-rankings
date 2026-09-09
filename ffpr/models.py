@@ -70,12 +70,27 @@ class PowerRankRow:
 
 
 @dataclass
+class PlayerMove:
+    player: PlayerScore  # points field unused here; name/position/team
+    move_type: str  # "waiver", "free_agent", "trade"
+    faab: int | None  # FAAB dollars spent, waiver adds only
+
+
+@dataclass
+class TeamRosterMoves:
+    roster_id: int
+    added: list[PlayerMove]
+    dropped: list[PlayerMove]
+
+
+@dataclass
 class WeekSummary:
     week: int
     matchups: list[Matchup]
     awards: WeekAwards
     allplay_week_wins: dict[int, int]  # roster_id -> teams outscored this week
     power_rankings: list[PowerRankRow]  # sorted by rank ascending
+    roster_moves: list[TeamRosterMoves]  # only teams with at least one move
 
 
 @dataclass

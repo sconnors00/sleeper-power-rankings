@@ -123,6 +123,7 @@ def _build_preseason(
     prev_summaries = build_week_summaries(
         [r["roster_id"] for r in prev_rosters],
         prev_weeks_raw,
+        {},  # roster moves aren't needed for the carried-over previous-season ranking
         prev_rosters_by_id,
         players,
         bool(prev_league["settings"].get("league_average_match", 0)),
@@ -191,8 +192,19 @@ def _build_season_summary(
         wk: client.get_matchups(league_id, season, wk, completed=True)
         for wk in range(1, through_week + 1)
     }
+    transactions_raw = {
+        wk: client.get_transactions(league_id, season, wk, completed=True)
+        for wk in range(1, through_week + 1)
+    }
     week_summaries = build_week_summaries(
-        roster_ids, weeks_raw, rosters_by_id, players, league_average_match, weights, form_window
+        roster_ids,
+        weeks_raw,
+        transactions_raw,
+        rosters_by_id,
+        players,
+        league_average_match,
+        weights,
+        form_window,
     )
     if week_summaries:
         apply_official_records(week_summaries[-1].power_rankings, rosters_by_id)
@@ -205,8 +217,9 @@ def _build_season_summary(
         if through_week < candidate < playoff_week_start:
             raw = client.get_matchups(league_id, season, candidate, completed=False)
             if raw:
+                raw_tx = client.get_transactions(league_id, season, candidate, completed=False)
                 provisional_week_summary = build_provisional_week_summary(
-                    candidate, raw, rosters_by_id, players
+                    candidate, raw, raw_tx, rosters_by_id, players
                 )
                 provisional_week_num = candidate
 

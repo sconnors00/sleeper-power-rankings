@@ -83,6 +83,14 @@ from keeper rules, not open bidding. League-wide biggest steals and overpays
 round out the page. Requires a completed auction draft; snake drafts are
 skipped.
 
+### Roster moves
+
+Each week page has a "Roster moves" table (right after power rankings):
+every team's adds and drops that week, sourced from Sleeper's transactions
+log for that week (waivers with the FAAB bid, free agent pickups, trades).
+Failed transactions (an outbid claim, a vetoed trade) never happened, so
+they're excluded.
+
 ## Weekly flow
 
 A GitHub Actions schedule rebuilds and republishes the site every Tuesday

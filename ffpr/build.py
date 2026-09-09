@@ -209,6 +209,7 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
     awards = wk.awards
     closest = [_matchup_pair(wk, mid, teams) for mid in awards.closest_matchup_ids]
     blowouts = [_matchup_pair(wk, mid, teams) for mid in awards.biggest_blowout_matchup_ids]
+    roster_moves_rows = [{"team": teams[m.roster_id], "moves": m} for m in wk.roster_moves]
 
     return {
         "season": season,
@@ -218,6 +219,7 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
         "results": results,
         "closest_matchups": closest,
         "blowout_matchups": blowouts,
+        "roster_moves_rows": roster_moves_rows,
         "highest_score_teams": [teams[rid] for rid in awards.highest_score_roster_ids],
         "lowest_score_teams": [teams[rid] for rid in awards.lowest_score_roster_ids],
         "best_bench": [(teams[rid], p) for rid, p in awards.best_bench],

@@ -94,6 +94,16 @@ class SleeperClient:
             return self._fetch_cache_first(f"/league/{league_id}/matchups/{week}", cache_file)
         return self._fetch_with_fallback_cache(f"/league/{league_id}/matchups/{week}", cache_file)
 
+    def get_transactions(
+        self, league_id: str, season: str, week: int, *, completed: bool
+    ) -> list[dict[str, Any]]:
+        cache_file = self._raw_dir(season) / f"transactions_week{week}.json"
+        if completed:
+            return self._fetch_cache_first(f"/league/{league_id}/transactions/{week}", cache_file)
+        return self._fetch_with_fallback_cache(
+            f"/league/{league_id}/transactions/{week}", cache_file
+        )
+
     def get_draft(self, draft_id: str) -> dict[str, Any]:
         cache_dir = self.data_dir / "drafts"
         cache_dir.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,7 @@ from ffpr.models import (
     DraftSummary,
     Matchup,
     PFLeaderboardRow,
+    PlayerMove,
     PlayerScore,
     PowerRankRow,
     PreseasonRow,
@@ -19,6 +20,7 @@ from ffpr.models import (
     SeasonRecords,
     Team,
     TeamDraftGrade,
+    TeamRosterMoves,
     WeekAwards,
     WeekSummary,
 )
@@ -422,9 +424,43 @@ def compute_power_rankings(
     return rows
 
 
+def compute_roster_moves(raw_transactions: list[dict], players_map: dict) -> list[TeamRosterMoves]:
+    """Adds/drops for the week, grouped by roster -- the roster differences
+    a team page shows. Failed transactions (an outbid waiver claim, a vetoed
+    trade) never happened, so they're excluded.
+    """
+    by_roster: dict[int, TeamRosterMoves] = {}
+
+    def bucket(rid: int) -> TeamRosterMoves:
+        if rid not in by_roster:
+            by_roster[rid] = TeamRosterMoves(roster_id=rid, added=[], dropped=[])
+        return by_roster[rid]
+
+    for tx in raw_transactions:
+        if tx.get("status") != "complete":
+            continue
+        tx_type = tx.get("type") or "waiver"
+        faab = (tx.get("settings") or {}).get("waiver_bid") if tx_type == "waiver" else None
+        for pid, rid in (tx.get("adds") or {}).items():
+            bucket(rid).added.append(
+                PlayerMove(
+                    player=_player_score(pid, 0.0, players_map), move_type=tx_type, faab=faab
+                )
+            )
+        for pid, rid in (tx.get("drops") or {}).items():
+            bucket(rid).dropped.append(
+                PlayerMove(
+                    player=_player_score(pid, 0.0, players_map), move_type=tx_type, faab=None
+                )
+            )
+
+    return [by_roster[rid] for rid in sorted(by_roster)]
+
+
 def build_week_summaries(
     roster_ids: list[int],
     weeks_raw_matchups: dict[int, list[dict]],
+    weeks_raw_transactions: dict[int, list[dict]],
     rosters_by_id: dict[int, dict],
     players_map: dict,
     league_average_match: bool,
@@ -474,6 +510,7 @@ def build_week_summaries(
             prev_ranks,
         )
         prev_ranks = {row.roster_id: row.rank for row in power_rankings}
+        roster_moves = compute_roster_moves(weeks_raw_transactions.get(week, []), players_map)
 
         summaries.append(
             WeekSummary(
@@ -482,6 +519,7 @@ def build_week_summaries(
                 awards=awards,
                 allplay_week_wins=allplay_week,
                 power_rankings=power_rankings,
+                roster_moves=roster_moves,
             )
         )
 
@@ -700,6 +738,7 @@ def apply_official_records(
 def build_provisional_week_summary(
     week: int,
     raw_matchups: list[dict],
+    raw_transactions: list[dict],
     rosters_by_id: dict[int, dict],
     players_map: dict,
 ) -> WeekSummary:
@@ -711,12 +750,14 @@ def build_provisional_week_summary(
     matchups = parse_week_matchups(raw_matchups, week, rosters_by_id, players_map)
     awards = compute_week_awards(matchups)
     allplay_week = compute_allplay_week(matchups)
+    roster_moves = compute_roster_moves(raw_transactions, players_map)
     return WeekSummary(
         week=week,
         matchups=matchups,
         awards=awards,
         allplay_week_wins=allplay_week,
         power_rankings=[],
+        roster_moves=roster_moves,
     )
 
 

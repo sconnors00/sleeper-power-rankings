@@ -3,6 +3,7 @@ from ffpr.compute import (
     build_teams,
     build_week_summaries,
     compute_allplay_week,
+    compute_roster_moves,
     compute_week_awards,
     compute_weekly_head_to_head,
     parse_week_matchups,
@@ -160,12 +161,43 @@ def test_compute_weekly_head_to_head_without_league_average_match(rosters, match
         assert games == 1
 
 
-def test_build_week_summaries_single_week_produces_power_rankings(rosters, matchups_week5, players):
+def test_compute_roster_moves_excludes_failed_and_groups_by_roster(transactions_week5, players):
+    moves = compute_roster_moves(transactions_week5, players)
+    failed_rosters = set()
+    complete_rosters = set()
+    for tx in transactions_week5:
+        target = complete_rosters if tx["status"] == "complete" else failed_rosters
+        target.update((tx.get("adds") or {}).values())
+        target.update((tx.get("drops") or {}).values())
+
+    result_rosters = {m.roster_id for m in moves}
+    assert result_rosters == complete_rosters
+    # every result roster actually has at least one move
+    assert all(m.added or m.dropped for m in moves)
+    # sorted by roster_id
+    assert [m.roster_id for m in moves] == sorted(result_rosters)
+
+
+def test_compute_roster_moves_waiver_add_carries_faab(transactions_week5, players):
+    moves = compute_roster_moves(transactions_week5, players)
+    waiver_tx = next(
+        t for t in transactions_week5 if t["status"] == "complete" and t["type"] == "waiver"
+    )
+    add_roster_id = next(iter(waiver_tx["adds"].values()))
+    row = next(m for m in moves if m.roster_id == add_roster_id)
+    matching = [m for m in row.added if m.move_type == "waiver" and m.faab is not None]
+    assert matching  # at least one waiver add on this roster carried its FAAB bid
+
+
+def test_build_week_summaries_single_week_produces_power_rankings(
+    rosters, matchups_week5, transactions_week5, players
+):
     rosters_by_id = {r["roster_id"]: r for r in rosters}
     roster_ids = [r["roster_id"] for r in rosters]
     weeks = build_week_summaries(
         roster_ids,
         {5: matchups_week5},
+        {5: transactions_week5},
         rosters_by_id,
         players,
         league_average_match=True,
@@ -182,6 +214,9 @@ def test_build_week_summaries_single_week_produces_power_rankings(rosters, match
     # luck = win_pct - allplay_pct for every row
     for row in week.power_rankings:
         assert row.luck == row.win_pct - row.allplay_pct
+    # roster moves came through from the transactions fixture
+    assert week.roster_moves
+    assert all(m.added or m.dropped for m in week.roster_moves)
 
 
 def test_build_week_summaries_movement_present_on_second_week(rosters, matchups_week5, players):
@@ -192,6 +227,7 @@ def test_build_week_summaries_movement_present_on_second_week(rosters, matchups_
     weeks = build_week_summaries(
         roster_ids,
         {5: matchups_week5, 6: matchups_week5},
+        {},
         rosters_by_id,
         players,
         league_average_match=True,
@@ -200,6 +236,7 @@ def test_build_week_summaries_movement_present_on_second_week(rosters, matchups_
     )
     assert len(weeks) == 2
     assert all(row.movement is not None for row in weeks[1].power_rankings)
+    assert weeks[0].roster_moves == []
 
 
 def test_fit_price_curve_excludes_keepers_and_sorts(draft_picks, players):
@@ -236,6 +273,7 @@ def test_build_preseason_rankings_carries_over_final_order(rosters, matchups_wee
     weeks = build_week_summaries(
         roster_ids,
         {5: matchups_week5},
+        {},
         rosters_by_id,
         players,
         league_average_match=True,
@@ -271,6 +309,7 @@ def test_build_preseason_rankings_unknown_roster_ranks_last(rosters, matchups_we
     weeks = build_week_summaries(
         roster_ids,
         {5: matchups_week5},
+        {},
         rosters_by_id,
         players,
         league_average_match=True,
@@ -312,6 +351,7 @@ def test_build_season_board_crowns_and_pf_leaderboard(rosters, matchups_week5, p
     weeks = build_week_summaries(
         roster_ids,
         {5: matchups_week5},
+        {},
         rosters_by_id,
         players,
         league_average_match=True,

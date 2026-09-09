@@ -7,13 +7,14 @@ from ffpr.models import SeasonSummary
 WEIGHTS = {"win_pct": 0.30, "allplay_pct": 0.25, "pf_norm": 0.30, "form_norm": 0.15}
 
 
-def _make_season(rosters, users, matchups_week5, players, league):
+def _make_season(rosters, users, matchups_week5, transactions_week5, players, league):
     roster_ids = [r["roster_id"] for r in rosters]
     rosters_by_id = {r["roster_id"]: r for r in rosters}
     teams = build_teams(rosters, users)
     weeks = build_week_summaries(
         roster_ids,
         {5: matchups_week5},
+        {5: transactions_week5},
         rosters_by_id,
         players,
         league_average_match=bool(league["settings"]["league_average_match"]),
@@ -34,8 +35,10 @@ def _make_season(rosters, users, matchups_week5, players, league):
     )
 
 
-def test_render_site_produces_every_page(tmp_path, rosters, users, matchups_week5, players, league):
-    season = _make_season(rosters, users, matchups_week5, players, league)
+def test_render_site_produces_every_page(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
     out = tmp_path / "site"
     render_site(season, out)
 
@@ -51,8 +54,10 @@ def test_render_site_produces_every_page(tmp_path, rosters, users, matchups_week
     assert 'href="../static/style.css"' in week_html  # relative asset paths
 
 
-def test_build_data_js_is_valid_json_payload(rosters, users, matchups_week5, players, league):
-    season = _make_season(rosters, users, matchups_week5, players, league)
+def test_build_data_js_is_valid_json_payload(
+    rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
     content = build_data_js(season)
     assert content.startswith("window.FFPR = ")
     assert content.rstrip().endswith(";")
@@ -62,15 +67,15 @@ def test_build_data_js_is_valid_json_payload(rosters, users, matchups_week5, pla
 
 
 def test_build_data_js_includes_provisional_week_matchups(
-    rosters, users, matchups_week5, players, league
+    rosters, users, matchups_week5, transactions_week5, players, league
 ):
     from ffpr.compute import build_provisional_week_summary
 
-    season = _make_season(rosters, users, matchups_week5, players, league)
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
     rosters_by_id = {r["roster_id"]: r for r in rosters}
     # reuse week 5's raw data as a stand-in in-progress week 6
     season.provisional_week_summary = build_provisional_week_summary(
-        6, matchups_week5, rosters_by_id, players
+        6, matchups_week5, transactions_week5, rosters_by_id, players
     )
     season.provisional_week = 6
     content = build_data_js(season)

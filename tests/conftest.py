@@ -22,6 +22,11 @@ def matchups_week5():
 
 
 @pytest.fixture
+def transactions_week5():
+    return json.loads((FIXTURES / "transactions_week5.json").read_text())
+
+
+@pytest.fixture
 def players():
     return json.loads((FIXTURES / "players_subset.json").read_text())
 

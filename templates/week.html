@@ -108,6 +108,32 @@
 </section>
 
 <section>
+  <h2>Roster moves</h2>
+  {% if roster_moves_rows %}
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Team</th><th>Added</th><th>Dropped</th></tr></thead>
+    <tbody>
+      {% for entry in roster_moves_rows %}
+      <tr>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
+        <td>
+          {% for m in entry.moves.added %}{{ m.player.name }}{% if m.move_type == "waiver" and m.faab %} (${{ m.faab }}){% elif m.move_type == "trade" %} (trade){% endif %}{% if not loop.last %}, {% endif %}{% else %}&mdash;{% endfor %}
+        </td>
+        <td>
+          {% for m in entry.moves.dropped %}{{ m.player.name }}{% if m.move_type == "trade" %} (trade){% endif %}{% if not loop.last %}, {% endif %}{% else %}&mdash;{% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="note">No roster moves this week.</p>
+  {% endif %}
+</section>
+
+<section>
   <h2>Results</h2>
   <ul class="results-list">
     {% for r in results %}
