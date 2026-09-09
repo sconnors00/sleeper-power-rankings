@@ -20,7 +20,6 @@ from ffpr.compute import (
     build_season_board,
     build_teams,
     build_week_summaries,
-    fit_price_curve,
     grade_draft,
 )
 from ffpr.models import PreseasonRow, SeasonSummary
@@ -76,8 +75,9 @@ def _find_through_week(
 def _fetch_draft(client: SleeperClient, league_obj: dict) -> tuple[dict, list[dict]] | None:
     """(draft, picks) for the league's completed auction draft, or None.
 
-    Best-effort: no draft, a snake draft, or a fetch failure with no cache
-    just means no draft grades and no roster-value preseason rankings.
+    Only feeds draft.html's grading -- pre-season rankings are roster-talent
+    based and don't need this. Best-effort: no draft, a snake draft, or a
+    fetch failure with no cache just means no draft grades.
     """
     draft_id = league_obj.get("draft_id")
     if not draft_id:
@@ -97,9 +97,10 @@ def _build_preseason(
     league_obj: dict,
     current_rosters: list[dict],
     players: dict,
-    picks: list[dict],
 ) -> list[PreseasonRow]:
-    """Roster-strength rankings from the auction price curve, before week 1."""
+    """Roster-talent rankings before week 1 -- only the players on a roster
+    affect this, never draft prices or last season's results.
+    """
     prev_rosters: list[dict] = []
     prev_id = league_obj.get("previous_league_id")
     if prev_id:
@@ -116,7 +117,6 @@ def _build_preseason(
         current_rosters,
         prev_rosters,
         players,
-        fit_price_curve(picks, players),
         league_obj["roster_positions"],
         champion_roster_id,
     )
@@ -189,8 +189,8 @@ def _build_season_summary(
         draft_summary = grade_draft(picks, players, draft.get("settings", {}).get("budget", 0))
 
     preseason: list[PreseasonRow] = []
-    if through_week == 0 and draft_data is not None:
-        preseason = _build_preseason(client, league_obj, rosters, players, draft_data[1])
+    if through_week == 0:
+        preseason = _build_preseason(client, league_obj, rosters, players)
 
     return SeasonSummary(
         season=season,

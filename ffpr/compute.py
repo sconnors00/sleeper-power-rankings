@@ -539,6 +539,22 @@ def player_dollar_value(player_id: str, players_map: dict, curve: PriceCurve) ->
     return expected_price(info.get("search_rank"), curve)
 
 
+def player_rank_value(player_id: str, players_map: dict) -> float:
+    """Draft-independent player value: inverse of Sleeper's global search_rank.
+
+    Used for pre-season rankings so they reflect roster talent alone -- not
+    this league's specific auction prices or spending. Unranked players
+    (mostly team defenses, which have no search_rank) are worth 0; that's
+    fine since every roster fields exactly one and it doesn't discriminate
+    between teams.
+    """
+    info = players_map.get(player_id) or {}
+    rank = info.get("search_rank")
+    if not rank or rank <= 0:
+        return 0.0
+    return 1000.0 / rank
+
+
 _SLOT_ELIGIBILITY = {
     "FLEX": {"RB", "WR", "TE"},
     "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
@@ -550,21 +566,16 @@ _SLOT_ELIGIBILITY = {
 
 def optimal_lineup_value(
     player_ids: list[str],
+    values: dict[str, float],
     players_map: dict,
-    curve: PriceCurve,
     roster_positions: list[str],
 ) -> tuple[float, float]:
-    """(starting lineup value, bench value) for the best legal lineup.
-
-    Fixed-position slots are filled before flex slots so each takes the best
-    remaining eligible player.
+    """(starting lineup value, bench value) for the best legal lineup, given a
+    precomputed per-player value map. Fixed-position slots are filled before
+    flex slots so each takes the best remaining eligible player.
     """
     valued = [
-        (
-            player_dollar_value(pid, players_map, curve),
-            (players_map.get(pid) or {}).get("position"),
-            pid,
-        )
+        (values.get(pid, 0.0), (players_map.get(pid) or {}).get("position"), pid)
         for pid in player_ids
     ]
     valued.sort(reverse=True)
@@ -591,20 +602,22 @@ def build_preseason_rankings(
     current_rosters: list[dict],
     prev_rosters: list[dict],
     players_map: dict,
-    curve: PriceCurve,
     roster_positions: list[str],
     champion_roster_id: int | None,
     bench_weight: float = 0.25,
 ) -> list[PreseasonRow]:
-    """Pre-season rankings from current roster strength: optimal lineup value
-    plus bench depth at a quarter weight, in league auction dollars.
+    """Pre-season rankings from current roster talent alone: optimal lineup
+    value (by player_rank_value, independent of any draft) plus bench depth
+    at a quarter weight.
     """
     prev_owner = {r["roster_id"]: r.get("owner_id") for r in prev_rosters}
     rows: list[PreseasonRow] = []
     for roster in current_rosters:
         rid = roster["roster_id"]
+        player_ids = roster.get("players") or []
+        values = {pid: player_rank_value(pid, players_map) for pid in player_ids}
         lineup_value, bench_value = optimal_lineup_value(
-            roster.get("players") or [], players_map, curve, roster_positions
+            player_ids, values, players_map, roster_positions
         )
         rows.append(
             PreseasonRow(

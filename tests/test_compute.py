@@ -237,25 +237,31 @@ def test_optimal_lineup_value_superflex_takes_second_qb():
         "rb1": {"position": "RB", "search_rank": 3},
         "wr1": {"position": "WR", "search_rank": 4},
     }
-    curve = [(1, 60), (2, 50), (3, 40), (4, 30)]
+    values = {"qb1": 60.0, "qb2": 50.0, "rb1": 40.0, "wr1": 30.0}
     lineup, bench = optimal_lineup_value(
-        ["qb1", "qb2", "rb1", "wr1"], players_map, curve, ["QB", "RB", "WR", "SUPER_FLEX", "BN"]
+        ["qb1", "qb2", "rb1", "wr1"], values, players_map, ["QB", "RB", "WR", "SUPER_FLEX", "BN"]
     )
-    # window median over 4 points is the same for all -> every player worth
-    # the same; the point is that all four fill slots (QB, RB, WR, SF=2nd QB)
+    # all four fill starting slots (QB, RB, WR, SF=2nd QB) -> nothing left for bench
     assert bench == 0.0
-    assert lineup > 0.0
+    assert lineup == 180.0
 
 
-def test_build_preseason_rankings_from_roster_strength(rosters_2026, draft_picks, players, league):
-    from ffpr.compute import build_preseason_rankings, fit_price_curve
+def test_player_rank_value_unranked_is_worthless():
+    from ffpr.compute import player_rank_value
 
-    curve = fit_price_curve(draft_picks, players)
+    assert player_rank_value("JAX", {"JAX": {"position": "DEF"}}) == 0.0
+    assert player_rank_value("x", {"x": {"search_rank": 1}}) > player_rank_value(
+        "y", {"y": {"search_rank": 100}}
+    )
+
+
+def test_build_preseason_rankings_from_roster_strength(rosters_2026, players, league):
+    from ffpr.compute import build_preseason_rankings
+
     rows = build_preseason_rankings(
         rosters_2026,
         rosters_2026,  # same owners -> no new_owner flags
         players,
-        curve,
         league["roster_positions"],
         champion_roster_id=1,
     )
