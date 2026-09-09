@@ -258,7 +258,10 @@ def render_site(season: SeasonSummary, output_dir: Path, site_url: str = "") -> 
 
     if not season.weeks:
         template = env.get_template("landing.html")
-        html = template.render(**common, asset_prefix="")
+        preseason_rows = [
+            {"row": row, "team": season.teams[row.roster_id]} for row in season.preseason
+        ]
+        html = template.render(**common, asset_prefix="", preseason_rows=preseason_rows)
         (output_dir / "index.html").write_text(html)
         if season.provisional_week_summary is not None:
             ctx = _week_context(

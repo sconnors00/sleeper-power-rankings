@@ -115,6 +115,17 @@ class SeasonBoard:
 
 
 @dataclass
+class PreseasonRow:
+    roster_id: int
+    rank: int
+    prev_rank: int | None  # None for a roster with no history in the previous league
+    prev_record: str | None
+    prev_pf: float | None
+    new_owner: bool
+    champion: bool
+
+
+@dataclass
 class SeasonSummary:
     season: str
     league_name: str
@@ -126,3 +137,4 @@ class SeasonSummary:
     provisional_week: int | None
     roster_positions: list[str] = field(default_factory=list)
     provisional_week_summary: WeekSummary | None = None
+    preseason: list[PreseasonRow] = field(default_factory=list)

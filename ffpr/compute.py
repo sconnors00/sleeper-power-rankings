@@ -11,6 +11,7 @@ from ffpr.models import (
     PFLeaderboardRow,
     PlayerScore,
     PowerRankRow,
+    PreseasonRow,
     SeasonBoard,
     SeasonBoardEntry,
     SeasonRecords,
@@ -482,6 +483,45 @@ def build_week_summaries(
         )
 
     return summaries
+
+
+def build_preseason_rankings(
+    prev_final_rankings: list[PowerRankRow],
+    prev_pf_by_roster: dict[int, float],
+    current_rosters: list[dict],
+    prev_rosters: list[dict],
+    champion_roster_id: int | None,
+) -> list[PreseasonRow]:
+    """Pre-season rankings: last season's final power-ranking order, carried
+    over by roster_id (Sleeper keeps roster ids stable across league renewals,
+    and in a keeper league the roster is the continuous entity even when the
+    owner changes). Rosters with no previous-season history rank last, in
+    roster_id order.
+    """
+    current_ids = {r["roster_id"] for r in current_rosters}
+    prev_owner = {r["roster_id"]: r.get("owner_id") for r in prev_rosters}
+    cur_owner = {r["roster_id"]: r.get("owner_id") for r in current_rosters}
+
+    ordered: list[tuple[int, PowerRankRow | None]] = [
+        (row.roster_id, row) for row in prev_final_rankings if row.roster_id in current_ids
+    ]
+    seen = {rid for rid, _ in ordered}
+    ordered += [(rid, None) for rid in sorted(current_ids - seen)]
+
+    rows: list[PreseasonRow] = []
+    for i, (rid, prev_row) in enumerate(ordered):
+        rows.append(
+            PreseasonRow(
+                roster_id=rid,
+                rank=i + 1,
+                prev_rank=prev_row.rank if prev_row else None,
+                prev_record=prev_row.record if prev_row else None,
+                prev_pf=prev_pf_by_roster.get(rid) if prev_row else None,
+                new_owner=rid in prev_owner and prev_owner[rid] != cur_owner.get(rid),
+                champion=rid == champion_roster_id,
+            )
+        )
+    return rows
 
 
 def official_record_string(roster: dict) -> str:

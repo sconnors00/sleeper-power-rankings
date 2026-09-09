@@ -9,18 +9,20 @@ import socketserver
 import tomllib
 from pathlib import Path
 
+import httpx
 import typer
 
 from ffpr.build import render_site
 from ffpr.compute import (
     apply_official_records,
+    build_preseason_rankings,
     build_provisional_week_summary,
     build_season_board,
     build_teams,
     build_week_summaries,
 )
-from ffpr.models import SeasonSummary
-from ffpr.sleeper import SleeperClient
+from ffpr.models import PreseasonRow, SeasonSummary
+from ffpr.sleeper import SleeperClient, SleeperError
 
 app = typer.Typer(help="Sleeper fantasy football power rankings static site generator.")
 
@@ -67,6 +69,65 @@ def _find_through_week(
         ):
             return week
     return 0
+
+
+def _build_preseason(
+    client: SleeperClient,
+    league_obj: dict,
+    current_rosters: list[dict],
+    players: dict,
+    weights: dict[str, float],
+    form_window: int,
+) -> list[PreseasonRow]:
+    """Last season's final power rankings mapped onto this season's rosters.
+
+    Best-effort: any failure (no previous league, network trouble with no
+    cache) just means no pre-season rankings, never a failed build.
+    """
+    prev_id = league_obj.get("previous_league_id")
+    if not prev_id:
+        return []
+    try:
+        prev_league = client.get_league(prev_id)
+        prev_season = prev_league["season"]
+        prev_rosters = client.get_rosters(prev_id, prev_season)
+        prev_playoff_start = prev_league["settings"]["playoff_week_start"]
+        prev_weeks_raw = {
+            wk: client.get_matchups(prev_id, prev_season, wk, completed=True)
+            for wk in range(1, prev_playoff_start)
+        }
+    except (SleeperError, httpx.HTTPError):
+        return []
+
+    prev_rosters_by_id = {r["roster_id"]: r for r in prev_rosters}
+    prev_summaries = build_week_summaries(
+        [r["roster_id"] for r in prev_rosters],
+        prev_weeks_raw,
+        prev_rosters_by_id,
+        players,
+        bool(prev_league["settings"].get("league_average_match", 0)),
+        weights,
+        form_window,
+    )
+    if not prev_summaries:
+        return []
+    apply_official_records(prev_summaries[-1].power_rankings, prev_rosters_by_id)
+    prev_pf_by_roster = {
+        r["roster_id"]: (r.get("settings", {}).get("fpts", 0) or 0)
+        + (r.get("settings", {}).get("fpts_decimal", 0) or 0) / 100
+        for r in prev_rosters
+    }
+
+    champion_raw = (league_obj.get("metadata") or {}).get("latest_league_winner_roster_id")
+    champion_roster_id = int(champion_raw) if champion_raw and str(champion_raw).isdigit() else None
+
+    return build_preseason_rankings(
+        prev_summaries[-1].power_rankings,
+        prev_pf_by_roster,
+        current_rosters,
+        prev_rosters,
+        champion_roster_id,
+    )
 
 
 def _build_season_summary(
@@ -129,6 +190,10 @@ def _build_season_summary(
                 )
                 provisional_week_num = candidate
 
+    preseason: list[PreseasonRow] = []
+    if through_week == 0:
+        preseason = _build_preseason(client, league_obj, rosters, players, weights, form_window)
+
     return SeasonSummary(
         season=season,
         league_name=league_obj["name"],
@@ -140,6 +205,7 @@ def _build_season_summary(
         provisional_week=provisional_week_num,
         roster_positions=league_obj["roster_positions"],
         provisional_week_summary=provisional_week_summary,
+        preseason=preseason,
     )
 
 
@@ -208,7 +274,17 @@ def blurb(
         )
 
     if not season_summary.weeks:
-        typer.echo(f"{season_summary.league_name}: no completed weeks yet.")
+        if season_summary.preseason:
+            teams = season_summary.teams
+            lines = [f"{season_summary.league_name} -- pre-season power rankings"]
+            for row in season_summary.preseason[:3]:
+                note = " (new owner)" if row.new_owner else ""
+                lines.append(f"  {row.rank}. {teams[row.roster_id].name}{note}")
+            if site_url:
+                lines.append(site_url)
+            typer.echo("\n".join(lines))
+        else:
+            typer.echo(f"{season_summary.league_name}: no completed weeks yet.")
         raise typer.Exit()
 
     wk = season_summary.weeks[-1]

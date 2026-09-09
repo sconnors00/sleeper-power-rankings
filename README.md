@@ -65,6 +65,15 @@ window = 3
 (`sleeper-power-rankings-prompt.md`) for exactly how each component is
 computed.
 
+### Pre-season rankings
+
+Before any week completes, the landing page shows pre-season power rankings:
+last season's final power-ranking order (via `previous_league_id`), carried
+over by roster -- Sleeper keeps roster ids stable across league renewals, so
+in a keeper league the roster is the continuous entity even when an owner
+changes (those get a "new owner" badge; the reigning champ gets a trophy).
+They disappear once Week 1 is in the books.
+
 ## Weekly flow
 
 A GitHub Actions schedule rebuilds and republishes the site every Tuesday

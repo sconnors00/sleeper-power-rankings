@@ -202,6 +202,63 @@ def test_build_week_summaries_movement_present_on_second_week(rosters, matchups_
     assert all(row.movement is not None for row in weeks[1].power_rankings)
 
 
+def test_build_preseason_rankings_carries_over_final_order(rosters, matchups_week5, players):
+    from ffpr.compute import build_preseason_rankings
+
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    roster_ids = [r["roster_id"] for r in rosters]
+    weeks = build_week_summaries(
+        roster_ids,
+        {5: matchups_week5},
+        rosters_by_id,
+        players,
+        league_average_match=True,
+        weights=WEIGHTS,
+        form_window=3,
+    )
+    final = weeks[-1].power_rankings
+    pf = {r["roster_id"]: 1000.0 + r["roster_id"] for r in rosters}
+
+    # same rosters, but roster 8's owner changed hands
+    current = [dict(r) for r in rosters]
+    for r in current:
+        if r["roster_id"] == 8:
+            r["owner_id"] = "brand-new-owner"
+
+    rows = build_preseason_rankings(
+        final, pf, current, rosters, champion_roster_id=final[0].roster_id
+    )
+    assert [r.roster_id for r in rows] == [r.roster_id for r in final]
+    assert [r.rank for r in rows] == list(range(1, 13))
+    assert rows[0].champion and not rows[1].champion
+    by_rid = {r.roster_id: r for r in rows}
+    assert by_rid[8].new_owner
+    assert sum(1 for r in rows if r.new_owner) == 1
+    assert by_rid[8].prev_pf == pf[8]
+
+
+def test_build_preseason_rankings_unknown_roster_ranks_last(rosters, matchups_week5, players):
+    from ffpr.compute import build_preseason_rankings
+
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    roster_ids = [r["roster_id"] for r in rosters]
+    weeks = build_week_summaries(
+        roster_ids,
+        {5: matchups_week5},
+        rosters_by_id,
+        players,
+        league_average_match=True,
+        weights=WEIGHTS,
+        form_window=3,
+    )
+    final = weeks[-1].power_rankings
+    current = [dict(r) for r in rosters] + [{"roster_id": 99, "owner_id": "someone"}]
+    rows = build_preseason_rankings(final, {}, current, rosters, champion_roster_id=None)
+    assert rows[-1].roster_id == 99
+    assert rows[-1].prev_rank is None
+    assert rows[-1].rank == 13
+
+
 def test_build_season_board_crowns_and_pf_leaderboard(rosters, matchups_week5, players):
     rosters_by_id = {r["roster_id"]: r for r in rosters}
     roster_ids = [r["roster_id"] for r in rosters]

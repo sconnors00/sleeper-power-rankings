@@ -89,3 +89,29 @@ def test_render_site_landing_page_when_no_completed_weeks(tmp_path, teams_only_s
     assert not (out / "season.html").exists()
     html = (out / "index.html").read_text()
     assert "Week 1 rankings land Tuesday morning" in html
+    assert "Pre-season power rankings" not in html  # no preseason data -> no table
+
+
+def test_render_site_landing_page_with_preseason_rankings(tmp_path, teams_only_season):
+    from ffpr.models import PreseasonRow
+
+    rids = sorted(teams_only_season.teams)
+    teams_only_season.preseason = [
+        PreseasonRow(
+            roster_id=rid,
+            rank=i + 1,
+            prev_rank=i + 1,
+            prev_record="8-6",
+            prev_pf=1500.0 + i,
+            new_owner=(i == 3),
+            champion=(i == 0),
+        )
+        for i, rid in enumerate(rids)
+    ]
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    html = (out / "index.html").read_text()
+    assert "Pre-season power rankings" in html
+    assert "new owner" in html
+    assert "&#127942;" in html  # champion trophy
+    assert "#1 (8-6)" in html
