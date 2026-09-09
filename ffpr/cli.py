@@ -53,10 +53,14 @@ def _find_through_week(
     roster_ids: list[int],
     start_week: int,
     playoff_week_start: int,
+    is_current_season: bool,
 ) -> int:
     """Walk backward from start_week until every roster has points > 0."""
     for week in range(min(start_week, playoff_week_start - 1), 0, -1):
-        raw = client.get_matchups(league_id, season, week, completed=(week != start_week))
+        # Only the current season's leading week can still be in progress;
+        # past seasons are fully completed, so always trust the cache there.
+        completed = not (is_current_season and week == start_week)
+        raw = client.get_matchups(league_id, season, week, completed=completed)
         if raw and all(
             any(m["roster_id"] == rid and (m.get("points") or 0) > 0 for m in raw)
             for rid in roster_ids
@@ -99,7 +103,7 @@ def _build_season_summary(
         through_week = min(through_override, playoff_week_start - 1)
     else:
         through_week = _find_through_week(
-            client, league_id, season, roster_ids, start_week, playoff_week_start
+            client, league_id, season, roster_ids, start_week, playoff_week_start, is_current_season
         )
 
     weeks_raw = {

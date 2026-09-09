@@ -257,6 +257,28 @@ def compute_allplay_week(matchups: list[Matchup]) -> dict[int, int]:
     return result
 
 
+def compute_allplay_week_equiv(matchups: list[Matchup]) -> dict[int, float]:
+    """Roster id -> all-play win-equivalents this week, with ties worth 0.5.
+
+    compute_allplay_week is the displayed "teams outscored" count; this is the
+    value accumulated into the all-play record so a scoring tie doesn't count
+    as a loss for both teams.
+    """
+    scores = [(m.roster_id, m.team_points) for m in matchups]
+    result: dict[int, float] = {}
+    for rid, pts in scores:
+        equiv = 0.0
+        for other_rid, other_pts in scores:
+            if other_rid == rid:
+                continue
+            if pts > other_pts:
+                equiv += 1.0
+            elif pts == other_pts:
+                equiv += 0.5
+        result[rid] = equiv
+    return result
+
+
 def _median(values: list[float]) -> float:
     s = sorted(values)
     n = len(s)
@@ -420,6 +442,7 @@ def build_week_summaries(
         matchups = parse_week_matchups(weeks_raw_matchups[week], week, rosters_by_id, players_map)
         awards = compute_week_awards(matchups)
         allplay_week = compute_allplay_week(matchups)
+        allplay_equiv = compute_allplay_week_equiv(matchups)
         h2h = compute_weekly_head_to_head(matchups, league_average_match)
 
         for m in matchups:
@@ -431,8 +454,7 @@ def build_week_summaries(
             cumulative_win[rid] += win_equiv
             cumulative_games[rid] += games
 
-            outscored = allplay_week.get(rid, 0)
-            cumulative_allplay_win[rid] += outscored + 0.0
+            cumulative_allplay_win[rid] += allplay_equiv.get(rid, 0.0)
             cumulative_allplay_games[rid] += len(matchups) - 1
 
         last_n_scores = {rid: score_history[rid][-form_window:] for rid in roster_ids}

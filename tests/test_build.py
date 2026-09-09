@@ -61,6 +61,27 @@ def test_build_data_js_is_valid_json_payload(rosters, users, matchups_week5, pla
     assert payload["rankTrajectory"]["weeks"] == [5]
 
 
+def test_build_data_js_includes_provisional_week_matchups(
+    rosters, users, matchups_week5, players, league
+):
+    from ffpr.compute import build_provisional_week_summary
+
+    season = _make_season(rosters, users, matchups_week5, players, league)
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    # reuse week 5's raw data as a stand-in in-progress week 6
+    season.provisional_week_summary = build_provisional_week_summary(
+        6, matchups_week5, rosters_by_id, players
+    )
+    season.provisional_week = 6
+    content = build_data_js(season)
+    payload = json.loads(content[len("window.FFPR = ") : -2])
+    # the provisional week's page needs its scores chart data...
+    assert "6" in payload["weekMatchups"]
+    # ...but it must stay out of the rankings and season-level series
+    assert payload["rankTrajectory"]["weeks"] == [5]
+    assert [s["week"] for s in payload["scoringSpread"]] == [5]
+
+
 def test_render_site_landing_page_when_no_completed_weeks(tmp_path, teams_only_season):
     out = tmp_path / "site"
     render_site(teams_only_season, out)

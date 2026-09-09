@@ -23,9 +23,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
+          enable-cache: true
+      # Completed weeks and the ~5 MB players map never change, so carry the
+      # raw-response cache between runs; restore-keys lets a new week reuse
+      # last week's entry and only fetch what's new.
+      - uses: actions/cache@v4
+        with:
+          path: data
+          key: sleeper-data-${{ github.run_id }}
+          restore-keys: |
+            sleeper-data-
       - run: uv sync
       - run: uv run ffpr build
         env:

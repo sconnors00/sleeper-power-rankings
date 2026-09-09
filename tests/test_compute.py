@@ -114,6 +114,32 @@ def test_compute_allplay_week_sums_to_expected_total(rosters, matchups_week5, pl
     assert sum(allplay.values()) == total_pairs - ties
 
 
+def test_compute_allplay_week_equiv_splits_ties():
+    from ffpr.compute import compute_allplay_week_equiv
+    from ffpr.models import Matchup
+
+    def mk(rid, pts):
+        return Matchup(
+            week=1,
+            matchup_id=rid,
+            roster_id=rid,
+            opponent_roster_id=None,
+            team_points=pts,
+            starters=[],
+            bench=[],
+        )
+
+    matchups = [mk(1, 100.0), mk(2, 100.0), mk(3, 90.0), mk(4, 110.0)]
+    equiv = compute_allplay_week_equiv(matchups)
+    # teams 1 and 2 tie each other (0.5), beat team 3 (1), lose to team 4 (0)
+    assert equiv[1] == 1.5
+    assert equiv[2] == 1.5
+    assert equiv[3] == 0.0
+    assert equiv[4] == 3.0
+    # win-equivalents across the league always sum to the number of pairs
+    assert sum(equiv.values()) == 4 * 3 / 2
+
+
 def test_compute_weekly_head_to_head_with_league_average_match(rosters, matchups_week5, players):
     rosters_by_id = {r["roster_id"]: r for r in rosters}
     matchups = parse_week_matchups(matchups_week5, 5, rosters_by_id, players)

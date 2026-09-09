@@ -61,8 +61,14 @@ def build_data_js(season: SeasonSummary) -> str:
         },
     }
 
+    # Charts on every week page need that week's matchups -- including the
+    # provisional week, which is excluded from rankings but still gets a page.
+    chart_weeks = list(season.weeks)
+    if season.provisional_week_summary is not None:
+        chart_weeks.append(season.provisional_week_summary)
+
     week_matchups = {}
-    for wk in season.weeks:
+    for wk in chart_weeks:
         rows = []
         for m in wk.matchups:
             opp = next((x for x in wk.matchups if x.roster_id == m.opponent_roster_id), None)
