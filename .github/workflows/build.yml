@@ -37,7 +37,7 @@ jobs:
           restore-keys: |
             sleeper-data-
       - run: uv sync
-      - run: uv run ffpr build
+      - run: uv run ffpr build --provisional
         env:
           SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
       - uses: actions/upload-pages-artifact@v3
