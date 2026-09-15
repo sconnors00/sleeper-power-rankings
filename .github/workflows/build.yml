@@ -40,6 +40,23 @@ jobs:
       - run: uv run ffpr build --provisional
         env:
           SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
+      - run: |
+          uv run python -c "
+          import json
+          league = json.load(open('data/leagues/${SLEEPER_LEAGUE_ID}.json'))
+          season = league['season']
+          rosters = json.load(open(f'data/{season}/raw/rosters.json'))
+          roster_ids = sorted(r['roster_id'] for r in rosters)
+          for wk in (1, 2):
+              try:
+                  m = json.load(open(f'data/{season}/raw/matchups_week{wk}.json'))
+              except FileNotFoundError:
+                  print(f'week {wk}: no cache file'); continue
+              scores = {x['roster_id']: x.get('points') for x in m}
+              print(f'week {wk}:', {rid: scores.get(rid) for rid in roster_ids})
+          "
+        env:
+          SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
