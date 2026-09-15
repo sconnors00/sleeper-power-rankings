@@ -37,6 +37,25 @@ jobs:
           restore-keys: |
             sleeper-data-
       - run: uv sync
+      - run: |
+          uv run python -c "
+          import json, os, httpx
+          lid = os.environ['SLEEPER_LEAGUE_ID']
+          state = httpx.get('https://api.sleeper.app/v1/state/nfl').json()
+          season = state['season']
+          print('state:', {k: state.get(k) for k in ('season','season_type','week','display_week','leg')})
+          for wk in (1, 2):
+              live = httpx.get(f'https://api.sleeper.app/v1/league/{lid}/matchups/{wk}').json()
+              print(f'FRESH  week {wk}:', sorted((m['roster_id'], m.get('points')) for m in live))
+              p = f'data/{season}/raw/matchups_week{wk}.json'
+              if os.path.exists(p):
+                  c = json.load(open(p))
+                  print(f'CACHED week {wk}:', sorted((m['roster_id'], m.get('points')) for m in c))
+              else:
+                  print(f'CACHED week {wk}: (no cache file)')
+          "
+        env:
+          SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
       - run: uv run ffpr build --provisional
         env:
           SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
