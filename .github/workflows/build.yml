@@ -43,27 +43,6 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
-      - run: |
-          uv run python -c "
-          import json, os, httpx
-          lid = os.environ['SLEEPER_LEAGUE_ID']
-          state = httpx.get('https://api.sleeper.app/v1/state/nfl').json()
-          season = state['season']
-          print('DIAG state:', {k: state.get(k) for k in ('season','season_type','week','display_week','leg')})
-          for wk in (1, 2):
-              live = httpx.get(f'https://api.sleeper.app/v1/league/{lid}/matchups/{wk}').json()
-              print(f'DIAG FRESH  week {wk}:', sorted((m['roster_id'], m.get('points')) for m in live))
-              p = f'data/{season}/raw/matchups_week{wk}.json'
-              if os.path.exists(p):
-                  c = json.load(open(p))
-                  print(f'DIAG CACHED week {wk}:', sorted((m['roster_id'], m.get('points')) for m in c))
-              else:
-                  print(f'DIAG CACHED week {wk}: (no cache file)')
-          print('DIAG built week pages:', sorted(os.listdir('site/weeks')))
-          print('DIAG raw cache files:', sorted(os.listdir(f'data/{season}/raw')))
-          "
-        env:
-          SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
 
   deploy:
     needs: build
