@@ -59,6 +59,8 @@ jobs:
                   print(f'DIAG CACHED week {wk}:', sorted((m['roster_id'], m.get('points')) for m in c))
               else:
                   print(f'DIAG CACHED week {wk}: (no cache file)')
+          print('DIAG built week pages:', sorted(os.listdir('site/weeks')))
+          print('DIAG raw cache files:', sorted(os.listdir(f'data/{season}/raw')))
           "
         env:
           SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}

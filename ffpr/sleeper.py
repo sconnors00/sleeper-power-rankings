@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,18 @@ PLAYERS_MAX_AGE_SECONDS = 24 * 60 * 60
 
 class SleeperError(RuntimeError):
     pass
+
+
+def week_has_scores(raw: list[dict[str, Any]]) -> bool:
+    """True once any roster has scored in a week.
+
+    Sleeper serves a week's matchups as soon as the schedule exists, long
+    before kickoff, and every roster reads 0.0 until games are played. Such a
+    response is a placeholder, not a result, so it must never be cached as
+    settled data -- otherwise a build that ran before kickoff pins the week at
+    0-0 for good once the week stops being the current one.
+    """
+    return any((m.get("points") or 0) > 0 for m in raw)
 
 
 class SleeperClient:
@@ -48,24 +61,37 @@ class SleeperClient:
         resp.raise_for_status()
         return resp.json()
 
-    def _fetch_with_fallback_cache(self, path: str, cache_file: Path) -> Any:
-        """Always try the network; fall back to a cached copy if it fails."""
+    def _fetch_with_fallback_cache(
+        self, path: str, cache_file: Path, settled: Callable[[Any], bool] | None = None
+    ) -> Any:
+        """Always try the network; fall back to a cached copy if it fails.
+
+        `settled` gates writing: a response it rejects is returned but not
+        cached, so a placeholder can't become the permanent answer.
+        """
         try:
             data = self._fetch(path)
         except httpx.HTTPError as exc:
             if cache_file.exists():
                 return json.loads(cache_file.read_text())
             raise SleeperError(f"GET {path} failed and no cache available: {exc}") from exc
-        cache_file.write_text(json.dumps(data))
+        if settled is None or settled(data):
+            cache_file.write_text(json.dumps(data))
         return data
 
-    def _fetch_cache_first(self, path: str, cache_file: Path) -> Any:
-        """Use the cache if present; otherwise fetch and cache the result."""
+    def _fetch_cache_first(
+        self, path: str, cache_file: Path, settled: Callable[[Any], bool] | None = None
+    ) -> Any:
+        """Use the cache if present; otherwise fetch and cache the result.
+
+        `settled` also gates reading: a cached placeholder is ignored and
+        refetched rather than trusted forever.
+        """
         if cache_file.exists():
-            return json.loads(cache_file.read_text())
-        data = self._fetch(path)
-        cache_file.write_text(json.dumps(data))
-        return data
+            cached = json.loads(cache_file.read_text())
+            if settled is None or settled(cached):
+                return cached
+        return self._fetch_with_fallback_cache(path, cache_file, settled)
 
     def get_state(self) -> dict[str, Any]:
         return self._fetch("/state/nfl")
@@ -90,9 +116,10 @@ class SleeperClient:
         self, league_id: str, season: str, week: int, *, completed: bool
     ) -> list[dict[str, Any]]:
         cache_file = self._raw_dir(season) / f"matchups_week{week}.json"
+        path = f"/league/{league_id}/matchups/{week}"
         if completed:
-            return self._fetch_cache_first(f"/league/{league_id}/matchups/{week}", cache_file)
-        return self._fetch_with_fallback_cache(f"/league/{league_id}/matchups/{week}", cache_file)
+            return self._fetch_cache_first(path, cache_file, week_has_scores)
+        return self._fetch_with_fallback_cache(path, cache_file, week_has_scores)
 
     def get_transactions(
         self, league_id: str, season: str, week: int, *, completed: bool
