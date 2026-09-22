@@ -9,6 +9,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from ffpr.compute import POSITIONS
 from ffpr.models import SeasonSummary
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -238,6 +239,18 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
     blowouts = [_matchup_pair(wk, mid, teams) for mid in awards.biggest_blowout_matchup_ids]
     roster_moves_rows = [{"team": teams[m.roster_id], "moves": m} for m in wk.roster_moves]
 
+    # Before kickoff every total is 0.0 and every team "ties for 1st" -- noise.
+    position_rank_rows = []
+    position_rank_extremes = {}
+    if any(pts > 0 for row in wk.position_ranks for pts in row.points.values()):
+        position_rank_rows = sorted(
+            ({"team": teams[row.roster_id], "row": row} for row in wk.position_ranks),
+            key=lambda e: -(matchups_by_roster[e["row"].roster_id].team_points),
+        )
+        for pos in POSITIONS:
+            ranks = [row.ranks[pos] for row in wk.position_ranks]
+            position_rank_extremes[pos] = (min(ranks), max(ranks))
+
     return {
         "season": season,
         "week": wk,
@@ -247,6 +260,9 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
         "closest_matchups": closest,
         "blowout_matchups": blowouts,
         "roster_moves_rows": roster_moves_rows,
+        "positions": POSITIONS,
+        "position_rank_rows": position_rank_rows,
+        "position_rank_extremes": position_rank_extremes,
         "highest_score_teams": [teams[rid] for rid in awards.highest_score_roster_ids],
         "lowest_score_teams": [teams[rid] for rid in awards.lowest_score_roster_ids],
         "best_bench": [(teams[rid], p) for rid, p in awards.best_bench],

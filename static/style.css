@@ -187,6 +187,11 @@ th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; text-transfo
 .up { color: var(--good); }
 .down { color: var(--bad); }
 
+.pos-rank { color: var(--text-muted); font-size: 0.8rem; }
+.pos-best { color: var(--good); font-weight: 600; }
+.pos-worst { color: var(--bad); }
+.pos-best .pos-rank, .pos-worst .pos-rank { color: inherit; }
+
 .results-list { list-style: none; padding: 0; margin: 0; }
 .results-list li {
   padding: 0.5rem 0;

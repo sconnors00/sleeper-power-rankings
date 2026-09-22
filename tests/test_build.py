@@ -216,3 +216,44 @@ def test_asset_version_changes_when_data_changes(
     after = re.search(r'data\.js\?v=([0-9a-f]+)"', (tmp_path / "b" / "index.html").read_text())
 
     assert before.group(1) != after.group(1)
+
+
+def test_week_page_shows_position_rankings(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "weeks" / "week-5.html").read_text()
+    section = html.split("<h2>Position rankings</h2>")[1].split("</section>")[0]
+    for pos in ("QB", "RB", "WR", "TE", "K", "DEF"):
+        assert f"<th>{pos}</th>" in section
+    assert section.count("team-cell") == len(rosters)
+    assert "pos-best" in section and "pos-worst" in section
+
+
+def test_position_rankings_hidden_before_kickoff(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import build_provisional_week_summary
+
+    unplayed = [
+        {
+            **m,
+            "points": 0.0,
+            "custom_points": None,
+            "starters_points": [0.0] * len(m["starters"]),
+            "players_points": {pid: 0.0 for pid in m.get("players") or []},
+        }
+        for m in matchups_week5
+    ]
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    season.provisional_week_summary = build_provisional_week_summary(
+        6, unplayed, [], rosters_by_id, players
+    )
+    season.provisional_week = 6
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "weeks" / "week-6.html").read_text()
+    assert "Position rankings appear once this week" in html
