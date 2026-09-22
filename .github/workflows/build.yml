@@ -48,6 +48,23 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      - run: |
+          uv run python -c "
+          import json, re
+          raw = open('site/data.js').read()
+          d = json.loads(raw[len('window.FFPR = '):].rstrip().rstrip(';'))
+          print('DIAG throughWeek:', d['throughWeek'], 'provisionalWeek:', d['provisionalWeek'])
+          print('DIAG rankTrajectory.weeks:', d['rankTrajectory']['weeks'])
+          print('DIAG rankTrajectory.series[1]:', d['rankTrajectory']['series'].get('1'))
+          print('DIAG weekMatchups keys:', sorted(d['weekMatchups'].keys()))
+          for k in sorted(d['weekMatchups']):
+              pts = [r['points'] for r in d['weekMatchups'][k]]
+              print(f'DIAG weekMatchups[{k}] points:', pts)
+          print('DIAG weeklyPointsByTeam.weeks:', d['weeklyPointsByTeam']['weeks'])
+          html = open('site/index.html').read()
+          print('DIAG index canvases:', re.findall(r'<canvas id=\"([^\"]+)\"[^>]*data-(?:through-)?week=\"([^\"]*)\"', html))
+          print('DIAG index data.js tag:', re.findall(r'<script[^>]*data\.js[^>]*>', html))
+          "
 
   deploy:
     needs: build
