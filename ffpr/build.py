@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -31,6 +32,20 @@ def _build_jinja_env() -> Environment:
     )
     env.filters["fmt2"] = _fmt2
     return env
+
+
+def _asset_version(data_js: str) -> str:
+    """Short digest of every file a page loads, used as a ?v= cache buster.
+
+    data.js changes every build but lives at a fixed URL, so without this a
+    browser will happily pair freshly fetched HTML asking for week N with a
+    cached payload that predates it -- the charts then read an empty
+    weekMatchups[N] and render blank.
+    """
+    digest = hashlib.sha256(data_js.encode())
+    for name in ("app.js", "style.css"):
+        digest.update((STATIC_DIR / name).read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def _week_url(week: int) -> str:
@@ -271,10 +286,12 @@ def render_site(
         shutil.rmtree(static_out)
     shutil.copytree(STATIC_DIR, static_out)
 
-    (output_dir / "data.js").write_text(build_data_js(season))
+    data_js = build_data_js(season)
+    (output_dir / "data.js").write_text(data_js)
 
     env = _build_jinja_env()
     common = {
+        "asset_version": _asset_version(data_js),
         "site_url": site_url,
         "chart_js_url": CHART_JS_URL,
         "chart_js_sri": CHART_JS_SRI,

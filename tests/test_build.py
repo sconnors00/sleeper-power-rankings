@@ -1,4 +1,5 @@
 import json
+import re
 
 from ffpr.build import build_data_js, render_site
 from ffpr.compute import build_season_board, build_teams, build_week_summaries
@@ -51,7 +52,7 @@ def test_render_site_produces_every_page(
 
     week_html = (out / "weeks" / "week-5.html").read_text()
     assert "Week 5" in week_html
-    assert 'href="../static/style.css"' in week_html  # relative asset paths
+    assert 'href="../static/style.css?v=' in week_html  # relative asset paths
 
 
 def test_build_data_js_is_valid_json_payload(
@@ -185,3 +186,33 @@ def test_render_site_draft_page(tmp_path, teams_only_season, draft_picks, player
     # every team's grade shows up
     for team in teams_only_season.draft.teams:
         assert teams_only_season.teams[team.roster_id].name in html
+
+
+def test_asset_urls_carry_version_token(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    """data.js lives at a fixed URL, so pages must request a versioned copy."""
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+
+    index = (out / "index.html").read_text()
+    token = re.search(r'data\.js\?v=([0-9a-f]+)"', index).group(1)
+    assert f'static/app.js?v={token}"' in index
+    assert f'static/style.css?v={token}"' in index
+
+
+def test_asset_version_changes_when_data_changes(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    """A rebuilt week must not be servable from a browser's cached payload."""
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+
+    render_site(season, tmp_path / "a")
+    before = re.search(r'data\.js\?v=([0-9a-f]+)"', (tmp_path / "a" / "index.html").read_text())
+
+    season.weeks[-1].matchups[0].team_points += 1.0
+    render_site(season, tmp_path / "b")
+    after = re.search(r'data\.js\?v=([0-9a-f]+)"', (tmp_path / "b" / "index.html").read_text())
+
+    assert before.group(1) != after.group(1)
