@@ -48,6 +48,30 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      - run: |
+          uv run python -c "
+          import json, os, httpx
+          lid = os.environ['SLEEPER_LEAGUE_ID']
+          state = httpx.get('https://api.sleeper.app/v1/state/nfl').json()
+          season = state['season']
+          for wk in (1, 2, 3):
+              live = httpx.get(f'https://api.sleeper.app/v1/league/{lid}/transactions/{wk}').json()
+              lc = sum(1 for t in live if t.get('status') == 'complete')
+              print(f'DIAG tx week {wk}: FRESH total={len(live)} complete={lc}')
+              p = f'data/{season}/raw/transactions_week{wk}.json'
+              if os.path.exists(p):
+                  c = json.load(open(p))
+                  cc = sum(1 for t in c if t.get('status') == 'complete')
+                  print(f'DIAG tx week {wk}: CACHED total={len(c)} complete={cc}')
+              else:
+                  print(f'DIAG tx week {wk}: CACHED (no cache file)')
+          for wk in (1, 2):
+              h = open(f'site/weeks/week-{wk}.html').read()
+              body = h.split('Roster moves')[1]
+              print(f'DIAG week-{wk} roster-move table rows:', body.count('team-cell'), '| empty-note:', 'No roster moves this week' in body)
+          "
+        env:
+          SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
 
   deploy:
     needs: build
