@@ -108,6 +108,32 @@
 </section>
 
 <section>
+  <h2>Position rankings</h2>
+  {% if position_rank_rows %}
+  <p class="note">Starter points at each position this week, with each team's rank in the league (#1 = most). Flex and superflex starters count at their own position.</p>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Team</th>{% for pos in positions %}<th>{{ pos }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for entry in position_rank_rows %}
+      <tr>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
+        {% for pos in positions %}
+        {% set rank = entry.row.ranks[pos] %}
+        {% set lo, hi = position_rank_extremes[pos] %}
+        <td{% if lo != hi and rank == lo %} class="pos-best"{% elif lo != hi and rank == hi %} class="pos-worst"{% endif %}>{{ entry.row.points[pos] | fmt2 }} <span class="pos-rank">#{{ rank }}</span></td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="note">Position rankings appear once this week's games kick off.</p>
+  {% endif %}
+</section>
+
+<section>
   <h2>Roster moves</h2>
   {% if roster_moves_rows %}
   <div class="table-scroll">

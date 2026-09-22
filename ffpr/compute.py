@@ -14,6 +14,7 @@ from ffpr.models import (
     PFLeaderboardRow,
     PlayerMove,
     PlayerScore,
+    PositionRankRow,
     PowerRankRow,
     PreseasonRow,
     SeasonBoard,
@@ -251,6 +252,35 @@ def compute_week_awards(matchups: list[Matchup]) -> WeekAwards:
         biggest_blowout_matchup_ids=blowout_ids,
         biggest_blowout_margin=blowout_margin,
     )
+
+
+POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")
+
+
+def compute_position_ranks(matchups: list[Matchup]) -> list[PositionRankRow]:
+    """Each team's starter points at each position, ranked against the league.
+
+    Starters count toward their own position whatever slot they filled, so a
+    superflex team starting two QBs carries both in its QB total. Ties share
+    a rank (1, 2, 2, 4).
+    """
+    totals: dict[int, dict[str, float]] = {}
+    for m in matchups:
+        by_pos = dict.fromkeys(POSITIONS, 0.0)
+        for p in m.starters:
+            if p.position in by_pos:
+                by_pos[p.position] += p.points
+        # Round before ranking so float summation order can't split a real tie.
+        totals[m.roster_id] = {pos: round(pts, 2) for pos, pts in by_pos.items()}
+
+    rows = []
+    for rid in sorted(totals):
+        ranks = {
+            pos: 1 + sum(1 for other in totals.values() if other[pos] > totals[rid][pos])
+            for pos in POSITIONS
+        }
+        rows.append(PositionRankRow(roster_id=rid, points=totals[rid], ranks=ranks))
+    return rows
 
 
 def compute_allplay_week(matchups: list[Matchup]) -> dict[int, int]:
@@ -521,6 +551,7 @@ def build_week_summaries(
                 allplay_week_wins=allplay_week,
                 power_rankings=power_rankings,
                 roster_moves=roster_moves,
+                position_ranks=compute_position_ranks(matchups),
             )
         )
 
@@ -759,6 +790,7 @@ def build_provisional_week_summary(
         allplay_week_wins=allplay_week,
         power_rankings=[],
         roster_moves=roster_moves,
+        position_ranks=compute_position_ranks(matchups),
     )
 
 

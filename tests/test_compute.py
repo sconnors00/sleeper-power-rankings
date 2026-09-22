@@ -1,8 +1,10 @@
 from ffpr.compute import (
+    POSITIONS,
     build_season_board,
     build_teams,
     build_week_summaries,
     compute_allplay_week,
+    compute_position_ranks,
     compute_roster_moves,
     compute_week_awards,
     compute_weekly_head_to_head,
@@ -400,3 +402,52 @@ def test_build_season_board_records_span_full_season(rosters, matchups_week5, pl
     assert records.closest_games[0].margin <= records.biggest_blowouts[0].margin
     for g in records.closest_games + records.biggest_blowouts:
         assert round(g.margin, 6) == round(abs(g.points_a - g.points_b), 6)
+
+
+def _team(rid, *starters):
+    from ffpr.models import Matchup, PlayerScore
+
+    players = [
+        PlayerScore(f"p{rid}{i}", f"P{i}", pos, None, pts) for i, (pos, pts) in enumerate(starters)
+    ]
+    return Matchup(1, rid, rid, None, sum(pts for _, pts in starters), players, [])
+
+
+def test_compute_position_ranks_on_real_week(rosters, matchups_week5, players):
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    matchups = parse_week_matchups(matchups_week5, 5, rosters_by_id, players)
+    rows = compute_position_ranks(matchups)
+
+    assert sorted(r.roster_id for r in rows) == sorted(m.roster_id for m in matchups)
+    by_rid = {m.roster_id: m for m in matchups}
+    for row in rows:
+        starters_total = sum(p.points for p in by_rid[row.roster_id].starters)
+        assert round(sum(row.points.values()), 2) == round(starters_total, 2)
+    for pos in POSITIONS:
+        best = max(rows, key=lambda r: r.points[pos])
+        assert best.ranks[pos] == 1
+        assert all(1 <= r.ranks[pos] <= len(rows) for r in rows)
+
+
+def test_compute_position_ranks_flex_counts_at_own_position():
+    """A superflex QB lands in the QB total, not in some FLEX bucket."""
+    rows = compute_position_ranks(
+        [_team(1, ("QB", 20.0), ("QB", 15.0), ("RB", 10.0)), _team(2, ("QB", 25.0), ("RB", 30.0))]
+    )
+    two_qb = next(r for r in rows if r.roster_id == 1)
+    assert two_qb.points["QB"] == 35.0
+    assert two_qb.ranks["QB"] == 1
+    assert two_qb.ranks["RB"] == 2
+
+
+def test_compute_position_ranks_ties_share_rank():
+    rows = compute_position_ranks(
+        [_team(1, ("K", 9.0)), _team(2, ("K", 9.0)), _team(3, ("K", 4.0)), _team(4, ("K", 12.0))]
+    )
+    ranks = {r.roster_id: r.ranks["K"] for r in rows}
+    assert ranks == {4: 1, 1: 2, 2: 2, 3: 4}
+
+
+def test_compute_position_ranks_ignores_unknown_positions():
+    rows = compute_position_ranks([_team(1, ("DL", 8.0), ("DEF", 6.0))])
+    assert rows[0].points == {"QB": 0.0, "RB": 0.0, "WR": 0.0, "TE": 0.0, "K": 0.0, "DEF": 6.0}

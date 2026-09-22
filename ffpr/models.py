@@ -84,6 +84,13 @@ class TeamRosterMoves:
 
 
 @dataclass
+class PositionRankRow:
+    roster_id: int
+    points: dict[str, float]  # position -> starter points this week
+    ranks: dict[str, int]  # position -> league rank, 1 = most points; ties share a rank
+
+
+@dataclass
 class WeekSummary:
     week: int
     matchups: list[Matchup]
@@ -91,6 +98,7 @@ class WeekSummary:
     allplay_week_wins: dict[int, int]  # roster_id -> teams outscored this week
     power_rankings: list[PowerRankRow]  # sorted by rank ascending
     roster_moves: list[TeamRosterMoves]  # only teams with at least one move
+    position_ranks: list[PositionRankRow]  # one row per roster, roster_id order
 
 
 @dataclass
