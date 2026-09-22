@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ league_name }}{% endblock %}</title>
-<link rel="stylesheet" href="{{ asset_prefix }}static/style.css">
+<link rel="stylesheet" href="{{ asset_prefix }}static/style.css?v={{ asset_version }}">
 </head>
 <body>
 <header class="site-header">
@@ -41,7 +41,7 @@
   <p>Built automatically from <a href="https://docs.sleeper.com" target="_blank" rel="noopener">Sleeper</a> league data.</p>
 </footer>
 <script src="{{ chart_js_url }}" integrity="{{ chart_js_sri }}" crossorigin="anonymous"></script>
-<script src="{{ asset_prefix }}data.js"></script>
-<script src="{{ asset_prefix }}static/app.js"></script>
+<script src="{{ asset_prefix }}data.js?v={{ asset_version }}"></script>
+<script src="{{ asset_prefix }}static/app.js?v={{ asset_version }}"></script>
 </body>
 </html>
