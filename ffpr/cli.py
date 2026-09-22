@@ -60,10 +60,7 @@ def _find_through_week(
 ) -> int:
     """Walk backward from start_week until every roster has points > 0."""
     for week in range(min(start_week, playoff_week_start - 1), 0, -1):
-        # Only the current season's leading week can still be in progress;
-        # past seasons are fully completed, so always trust the cache there.
-        completed = not (is_current_season and week == start_week)
-        raw = client.get_matchups(league_id, season, week, completed=completed)
+        raw = client.get_matchups(league_id, season, week, completed=not is_current_season)
         if raw and all(
             any(m["roster_id"] == rid and (m.get("points") or 0) > 0 for m in raw)
             for rid in roster_ids
@@ -206,12 +203,18 @@ def _build_season_summary(
             client, league_id, season, roster_ids, start_week, playoff_week_start, is_current_season
         )
 
+    # Only a finished season is immutable. A week in the current season keeps
+    # changing after its games end -- waiver claims processed midweek land in
+    # the week just gone (2026 week 1 went from 17 to 28 completed moves after
+    # its Tuesday build), and stat corrections revise scores -- so the current
+    # season is always refetched rather than served from the on-disk cache.
+    historical = not is_current_season
     weeks_raw = {
-        wk: client.get_matchups(league_id, season, wk, completed=True)
+        wk: client.get_matchups(league_id, season, wk, completed=historical)
         for wk in range(1, through_week + 1)
     }
     transactions_raw = {
-        wk: client.get_transactions(league_id, season, wk, completed=True)
+        wk: client.get_transactions(league_id, season, wk, completed=historical)
         for wk in range(1, through_week + 1)
     }
     week_summaries = build_week_summaries(
