@@ -1381,8 +1381,12 @@ def build_rivalries(seasons: list[SeasonSummary]) -> list[Manager]:
 
 def rivalry_highlights(managers: list[Manager], min_meetings: int = 4) -> dict:
     """The league's most one-sided and most even rivalries, and its longest
-    active winning streak. Each pair is judged once, from the side ahead."""
+    active winning streak -- active meaning both managers are still in the
+    league, so a streak frozen by someone leaving doesn't count. Each pair is
+    judged once, from the side ahead."""
     one_sided = even = streak = None
+    latest = max((s for m in managers for s in m.seasons), default=None)
+    current = {m.owner_id for m in managers if latest in m.seasons}
     for manager in managers:
         for h in manager.rivals:
             games = len(h.meetings)
@@ -1394,6 +1398,7 @@ def rivalry_highlights(managers: list[Manager], min_meetings: int = 4) -> dict:
                 if even is None or (-gap, games) > (-even[2], len(even[1].meetings)):
                     even = (manager, h, gap)
             result, run = h.streak
-            if result == "W" and (streak is None or run > streak[2]):
+            both_current = manager.owner_id in current and h.opponent_id in current
+            if result == "W" and both_current and (streak is None or run > streak[2]):
                 streak = (manager, h, run)
     return {"one_sided": one_sided, "even": even, "streak": streak}

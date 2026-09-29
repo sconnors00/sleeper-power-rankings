@@ -749,3 +749,21 @@ def test_rivalry_highlights():
     assert hl["one_sided"][0].owner_id == "ann" and hl["one_sided"][1].record == "6-0"
     assert hl["even"][1].record in ("3-0-3", "0-3-3")
     assert hl["streak"][0].owner_id == "ann" and hl["streak"][2] == 6
+
+
+def test_active_streak_needs_both_managers_still_in_the_league():
+    from ffpr.compute import build_rivalries, rivalry_highlights
+
+    # ann beat bob every week in 2024, then bob left; cat and ann split 2025
+    older = _season(
+        "2024", {1: "ann", 2: "bob"}, *[(w, [(1, 1, 100.0), (1, 2, 90.0)]) for w in range(1, 6)]
+    )
+    newer = _season(
+        "2025",
+        {1: "ann", 2: "cat"},
+        (1, [(1, 1, 100.0), (1, 2, 90.0)]),
+        (2, [(1, 1, 80.0), (1, 2, 95.0)]),
+    )
+    hl = rivalry_highlights(build_rivalries([newer, older]))
+    assert hl["streak"][0].owner_id == "cat" and hl["streak"][2] == 1
+    assert hl["one_sided"][1].record == "5-0"  # history still counts for the other cards
