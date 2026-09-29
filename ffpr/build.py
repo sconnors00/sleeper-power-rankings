@@ -9,8 +9,8 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from ffpr.compute import DEFAULT_FORM_WINDOW, DEFAULT_WEIGHTS, POSITIONS
-from ffpr.models import SeasonSummary
+from ffpr.compute import DEFAULT_FORM_WINDOW, DEFAULT_WEIGHTS, POSITIONS, rivalry_highlights
+from ffpr.models import Manager, SeasonSummary
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = PACKAGE_ROOT / "templates"
@@ -347,6 +347,7 @@ def render_site(
     site_url: str = "",
     all_seasons: list[str] | None = None,
     site_root_prefix: str = "",
+    rivalries: list[Manager] | None = None,
 ) -> None:
     """Render one season's site into output_dir.
 
@@ -380,6 +381,7 @@ def render_site(
         "season_year": season.season,
         "has_draft": season.draft is not None,
         "has_season": bool(season.weeks),
+        "has_rivalries": bool(rivalries),
         "all_seasons": all_seasons or [season.season],
         "site_root_prefix": site_root_prefix,
         "year_url": _year_url,
@@ -412,6 +414,17 @@ def render_site(
             **common, asset_prefix="../", teams=season.teams, records=season.season_board.records
         )
         (weeks_dir / f"week-{season.playoff_week_start}.html").write_text(html)
+
+    if rivalries:
+        rivalry_template = env.get_template("rivalries.html")
+        html = rivalry_template.render(
+            **common,
+            asset_prefix="",
+            managers=rivalries,
+            by_id={m.owner_id: m for m in rivalries},
+            highlights=rivalry_highlights(rivalries),
+        )
+        (output_dir / "rivalries.html").write_text(html)
 
     how_template = env.get_template("how_it_works.html")
     html = how_template.render(**common, **_how_it_works_context(season), asset_prefix="")

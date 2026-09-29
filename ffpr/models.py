@@ -274,6 +274,88 @@ class AcquisitionSummary:
 
 
 @dataclass
+class Meeting:
+    season: str
+    week: int
+    points_for: float
+    points_against: float
+
+    @property
+    def result(self) -> str:
+        if self.points_for > self.points_against:
+            return "W"
+        return "L" if self.points_for < self.points_against else "T"
+
+
+@dataclass
+class HeadToHead:
+    opponent_id: str
+    meetings: list[Meeting]  # oldest first
+
+    @property
+    def wins(self) -> int:
+        return sum(m.result == "W" for m in self.meetings)
+
+    @property
+    def losses(self) -> int:
+        return sum(m.result == "L" for m in self.meetings)
+
+    @property
+    def ties(self) -> int:
+        return sum(m.result == "T" for m in self.meetings)
+
+    @property
+    def record(self) -> str:
+        base = f"{self.wins}-{self.losses}"
+        return f"{base}-{self.ties}" if self.ties else base
+
+    @property
+    def points_for(self) -> float:
+        return sum(m.points_for for m in self.meetings)
+
+    @property
+    def points_against(self) -> float:
+        return sum(m.points_against for m in self.meetings)
+
+    @property
+    def streak(self) -> tuple[str, int]:
+        """The current run of identical results, newest meeting backwards."""
+        last = self.meetings[-1].result
+        run = 0
+        for m in reversed(self.meetings):
+            if m.result != last:
+                break
+            run += 1
+        return last, run
+
+
+@dataclass
+class Manager:
+    owner_id: str
+    name: str  # their team name in the latest season they played
+    color: str
+    seasons: list[str]  # newest first
+    rivals: list[HeadToHead]  # most meetings first
+
+    @property
+    def wins(self) -> int:
+        return sum(h.wins for h in self.rivals)
+
+    @property
+    def losses(self) -> int:
+        return sum(h.losses for h in self.rivals)
+
+    @property
+    def ties(self) -> int:
+        return sum(h.ties for h in self.rivals)
+
+    @property
+    def win_pct(self) -> float:
+        games = self.wins + self.losses + self.ties
+        return (self.wins + 0.5 * self.ties) / games if games else 0.0
+
+
+@dataclass
 class PlayoffOddsRow:
     roster_id: int
     record: str  # current, median games included when the league plays them

@@ -15,8 +15,11 @@ from ffpr.models import (
     DraftPickGrade,
     DraftSummary,
     GameRecord,
+    HeadToHead,
     LineupRow,
+    Manager,
     Matchup,
+    Meeting,
     PFLeaderboardRow,
     PlayerMove,
     PlayerScore,
@@ -28,6 +31,7 @@ from ffpr.models import (
     SeasonBoardEntry,
     SeasonLineupRow,
     SeasonRecords,
+    SeasonSummary,
     Team,
     TeamDraftGrade,
     TeamRosterMoves,
@@ -1300,3 +1304,73 @@ def grade_acquisitions(
     ]
     graded.reverse()
     return AcquisitionSummary(pickups=pickups, trades=graded)
+
+
+# --- All-time rivalries ---
+
+
+def build_rivalries(seasons: list[SeasonSummary]) -> list[Manager]:
+    """Regular-season head-to-head records between managers, every season.
+
+    Managers are keyed by Sleeper user id, not roster, so a record follows
+    the person through roster changes and an orphaned roster's new owner
+    starts fresh. Only real matchups count: a win over the weekly median
+    isn't a win over anyone.
+    """
+    meetings: dict[str, dict[str, list[Meeting]]] = {}
+    profile: dict[str, tuple[str, str]] = {}  # owner -> (name, color) from their latest season
+    for s in sorted(seasons, key=lambda s: s.season, reverse=True):
+        for team in s.teams.values():
+            if team.owner_id:
+                profile.setdefault(team.owner_id, (team.name, team.color))
+        for wk in s.weeks:
+            pairs: dict[int, list[Matchup]] = {}
+            for m in wk.matchups:
+                pairs.setdefault(m.matchup_id, []).append(m)
+            for pair in pairs.values():
+                if len(pair) != 2:
+                    continue
+                a, b = pair
+                owner_a = getattr(s.teams.get(a.roster_id), "owner_id", None)
+                owner_b = getattr(s.teams.get(b.roster_id), "owner_id", None)
+                if not owner_a or not owner_b or owner_a == owner_b:
+                    continue
+                meetings.setdefault(owner_a, {}).setdefault(owner_b, []).append(
+                    Meeting(s.season, wk.week, a.team_points, b.team_points)
+                )
+                meetings.setdefault(owner_b, {}).setdefault(owner_a, []).append(
+                    Meeting(s.season, wk.week, b.team_points, a.team_points)
+                )
+
+    managers = []
+    for owner, by_opponent in meetings.items():
+        rivals = [
+            HeadToHead(opp, sorted(ms, key=lambda m: (m.season, m.week)))
+            for opp, ms in by_opponent.items()
+        ]
+        rivals.sort(key=lambda h: (-len(h.meetings), -h.wins, h.opponent_id))
+        name, color = profile[owner]
+        played = sorted({m.season for h in rivals for m in h.meetings}, reverse=True)
+        managers.append(Manager(owner, name, color, played, rivals))
+    managers.sort(key=lambda m: (-m.win_pct, -m.wins, m.name))
+    return managers
+
+
+def rivalry_highlights(managers: list[Manager], min_meetings: int = 4) -> dict:
+    """The league's most one-sided and most even rivalries, and its longest
+    active winning streak. Each pair is judged once, from the side ahead."""
+    one_sided = even = streak = None
+    for manager in managers:
+        for h in manager.rivals:
+            games = len(h.meetings)
+            if h.wins >= h.losses and games >= min_meetings:
+                share = (h.wins + 0.5 * h.ties) / games
+                if one_sided is None or (share, games) > (one_sided[2], len(one_sided[1].meetings)):
+                    one_sided = (manager, h, share)
+                gap = h.wins - h.losses
+                if even is None or (-gap, games) > (-even[2], len(even[1].meetings)):
+                    even = (manager, h, gap)
+            result, run = h.streak
+            if result == "W" and (streak is None or run > streak[2]):
+                streak = (manager, h, run)
+    return {"one_sided": one_sided, "even": even, "streak": streak}

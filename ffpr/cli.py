@@ -19,6 +19,7 @@ from ffpr.compute import (
     apply_official_records,
     build_preseason_rankings,
     build_provisional_week_summary,
+    build_rivalries,
     build_season_board,
     build_teams,
     build_week_summaries,
@@ -370,8 +371,11 @@ def build(
 
     all_summaries = [season_summary, *past_summaries]
     all_seasons = [s.season for s in all_summaries]
+    rivalries = build_rivalries(all_summaries)
 
-    render_site(season_summary, SITE_DIR, site_url=site_url, all_seasons=all_seasons)
+    render_site(
+        season_summary, SITE_DIR, site_url=site_url, all_seasons=all_seasons, rivalries=rivalries
+    )
     for s in all_summaries:
         render_site(
             s,
@@ -379,6 +383,7 @@ def build(
             site_url=site_url,
             all_seasons=all_seasons,
             site_root_prefix="../",
+            rivalries=rivalries,
         )
 
     msg = f"Built site/ through week {season_summary.through_week}"

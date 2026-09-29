@@ -387,3 +387,26 @@ def test_season_page_grades_pickups_and_trades(
     assert "Week 5" in trades
     for side in season.acquisitions.trades[0].sides:
         assert season.teams[side.roster_id].name in trades
+
+
+def test_rivalries_page(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import build_rivalries
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    rivalries = build_rivalries([season])
+    out = tmp_path / "site"
+    render_site(season, out, rivalries=rivalries)
+
+    html = (out / "rivalries.html").read_text()
+    assert html.count('<details class="rivalry">') == len(rivalries)
+    assert "All-time standings" in html
+    assert 'href="rivalries.html"' in (out / "index.html").read_text()
+
+
+def test_no_rivalries_page_without_rivalries(tmp_path, teams_only_season):
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    assert not (out / "rivalries.html").exists()
+    assert "rivalries.html" not in (out / "index.html").read_text()

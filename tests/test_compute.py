@@ -680,3 +680,61 @@ def test_grade_acquisitions_on_a_real_week(rosters, matchups_week5, transactions
     [trade] = summary.trades
     assert sorted(s.roster_id for s in trade.sides) == [1, 10]
     assert all(len(s.received) == 3 for s in trade.sides)
+
+
+def _season(year, owners, *weeks):
+    """weeks: (week, [(matchup_id, roster_id, points), ...])"""
+    from types import SimpleNamespace
+
+    from ffpr.models import Matchup, Team
+
+    teams = {
+        rid: Team(rid, owner, f"{owner}-{year}", None, "#000") for rid, owner in owners.items()
+    }
+    return SimpleNamespace(
+        season=year,
+        teams=teams,
+        weeks=[
+            SimpleNamespace(
+                week=num,
+                matchups=[Matchup(num, mid, rid, None, pts, [], []) for mid, rid, pts in games],
+            )
+            for num, games in weeks
+        ],
+    )
+
+
+def test_rivalries_follow_the_manager_not_the_roster():
+    from ffpr.compute import build_rivalries
+
+    older = _season("2024", {1: "ann", 2: "bob"}, (1, [(1, 1, 100.0), (1, 2, 90.0)]))
+    # roster 1 changed hands: 'cat' must not inherit ann's record
+    newer = _season(
+        "2025",
+        {1: "cat", 2: "bob"},
+        (1, [(1, 1, 80.0), (1, 2, 95.0)]),
+        (2, [(1, 1, 70.0), (1, 2, 60.0)]),
+    )
+    managers = {m.owner_id: m for m in build_rivalries([newer, older])}
+
+    bob = {h.opponent_id: h for h in managers["bob"].rivals}
+    assert bob["ann"].record == "0-1"
+    assert bob["cat"].record == "1-1"
+    assert managers["ann"].seasons == ["2024"]
+    assert managers["bob"].seasons == ["2025", "2024"]
+    assert managers["bob"].name == "bob-2025"  # latest team name
+    assert bob["cat"].streak == ("L", 1)
+
+
+def test_rivalry_highlights():
+    from ffpr.compute import build_rivalries, rivalry_highlights
+
+    weeks = [
+        (w, [(1, 1, 100.0 + w), (1, 2, 90.0), (2, 3, 80.0), (2, 4, 80.0 + (w % 2) * 20)])
+        for w in range(1, 7)
+    ]
+    season = _season("2025", {1: "ann", 2: "bob", 3: "cat", 4: "dan"}, *weeks)
+    hl = rivalry_highlights(build_rivalries([season]))
+    assert hl["one_sided"][0].owner_id == "ann" and hl["one_sided"][1].record == "6-0"
+    assert hl["even"][1].record in ("3-0-3", "0-3-3")
+    assert hl["streak"][0].owner_id == "ann" and hl["streak"][2] == 6
