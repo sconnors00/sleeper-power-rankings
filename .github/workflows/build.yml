@@ -48,6 +48,32 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      - run: |
+          uv run python -c "
+          import re, html as H
+          def txt(s): return H.unescape(re.sub(r'<[^>]+>', ' ', s)).split()
+          s = open('site/season.html').read()
+          if 'id=\"playoff-odds\"' in s:
+              sec = s.split('id=\"playoff-odds\"')[1].split('</section>')[0]
+              rows = sec.split('<tr>')[2:]
+              print('DIAG odds rows:', len(rows))
+              print('DIAG odds note:', ' '.join(txt(sec.split('</p>')[0]))[:200])
+              for r in rows[:3] + rows[-2:]: print('DIAG  ', ' '.join(txt(r)))
+          else:
+              print('DIAG odds: MISSING')
+          for sid in ('pickups', 'trades'):
+              print(f'DIAG {sid}:', 'present' if f'id=\"{sid}\"' in s else 'absent')
+          if 'id=\"pickups\"' in s:
+              sec = s.split('id=\"pickups\"')[1].split('</section>')[0]
+              print('DIAG  top pickup:', ' '.join(txt(sec.split('<tr>')[2])))
+          print('DIAG lineup leaderboard:', 'present' if '<h2>Lineup efficiency</h2>' in s else 'absent')
+          idx = open('site/index.html').read()
+          m = re.search(r'Costliest lineup call</h3>(.*?)</div>', idx, re.S)
+          print('DIAG costliest:', ' '.join(txt(m.group(1))) if m else 'none')
+          r = open('site/rivalries.html').read()
+          print('DIAG rivalries managers:', r.count('<details class=\"rivalry\">'))
+          print('DIAG rivalry cards:', ' | '.join(' '.join(txt(c)) for c in re.findall(r'<div class=\"award-card[^\"]*\">(.*?)</div>', r, re.S)))
+          "
 
   deploy:
     needs: build
