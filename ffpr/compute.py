@@ -256,6 +256,9 @@ def compute_week_awards(matchups: list[Matchup]) -> WeekAwards:
 
 POSITIONS = ("QB", "RB", "WR", "TE", "K", "DEF")
 
+DEFAULT_WEIGHTS = {"win_pct": 0.30, "allplay_pct": 0.25, "pf_norm": 0.30, "form_norm": 0.15}
+DEFAULT_FORM_WINDOW = 3
+
 
 def compute_position_ranks(matchups: list[Matchup]) -> list[PositionRankRow]:
     """Each team's starter points at each position, ranked against the league.

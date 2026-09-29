@@ -9,7 +9,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from ffpr.compute import POSITIONS
+from ffpr.compute import DEFAULT_FORM_WINDOW, DEFAULT_WEIGHTS, POSITIONS
 from ffpr.models import SeasonSummary
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -276,6 +276,47 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
     }
 
 
+RANKING_COMPONENTS = {
+    "win_pct": "Win %",
+    "allplay_pct": "All-play %",
+    "pf_norm": "Points for, scaled",
+    "form_norm": "Recent form, scaled",
+}
+
+
+def _how_it_works_context(season: SeasonSummary) -> dict:
+    """The live numbers the explainer quotes, so it can't drift from the code."""
+    weights = season.weights or DEFAULT_WEIGHTS
+    example = None
+    if season.weeks:
+        wk = season.weeks[-1]
+        top = wk.power_rankings[0]
+        example = {
+            "week": wk.week,
+            "team": season.teams[top.roster_id],
+            "score": top.score,
+            "terms": [
+                {
+                    "label": RANKING_COMPONENTS[key],
+                    "weight": weights[key],
+                    "value": getattr(top, key),
+                }
+                for key in RANKING_COMPONENTS
+            ],
+        }
+    return {
+        "weights": [
+            {"key": key, "label": label, "weight": weights[key]}
+            for key, label in RANKING_COMPONENTS.items()
+        ],
+        "form_window": season.form_window or DEFAULT_FORM_WINDOW,
+        "league_average_match": season.league_average_match,
+        "num_teams": len(season.teams),
+        "example": example,
+        "positions": POSITIONS,
+    }
+
+
 def render_site(
     season: SeasonSummary,
     output_dir: Path,
@@ -347,6 +388,10 @@ def render_site(
             **common, asset_prefix="../", teams=season.teams, records=season.season_board.records
         )
         (weeks_dir / f"week-{season.playoff_week_start}.html").write_text(html)
+
+    how_template = env.get_template("how_it_works.html")
+    html = how_template.render(**common, **_how_it_works_context(season), asset_prefix="")
+    (output_dir / "how-it-works.html").write_text(html)
 
     if not season.weeks:
         template = env.get_template("landing.html")
