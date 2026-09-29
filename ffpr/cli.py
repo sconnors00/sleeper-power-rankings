@@ -226,6 +226,7 @@ def _build_season_summary(
         league_average_match,
         weights,
         form_window,
+        roster_positions=league_obj["roster_positions"],
     )
     if week_summaries:
         apply_official_records(week_summaries[-1].power_rankings, rosters_by_id)
@@ -240,7 +241,7 @@ def _build_season_summary(
             if raw:
                 raw_tx = client.get_transactions(league_id, season, candidate, completed=False)
                 provisional_week_summary = build_provisional_week_summary(
-                    candidate, raw, raw_tx, rosters_by_id, players
+                    candidate, raw, raw_tx, rosters_by_id, players, league_obj["roster_positions"]
                 )
                 provisional_week_num = candidate
 

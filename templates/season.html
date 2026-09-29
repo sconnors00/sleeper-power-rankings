@@ -101,6 +101,29 @@
   <div class="chart-container chart-tall"><canvas id="chart-pf-pa"></canvas></div>
 </section>
 
+{% if board.lineup_leaderboard %}
+<section>
+  <h2>Lineup efficiency</h2>
+  <p class="note">How close each manager's lineups came to the best possible lineup from their own roster, all season. <a href="how-it-works.html#lineups">How this works</a></p>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>#</th><th>Team</th><th>Efficiency</th><th>Missed points</th><th>Perfect weeks</th></tr></thead>
+    <tbody>
+      {% for r in board.lineup_leaderboard %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[r.roster_id].color }}"></span>{{ teams[r.roster_id].name }}</td>
+        <td>{{ "%.1f" | format(r.efficiency * 100) }}%</td>
+        <td>{{ r.left_on_bench | fmt2 }}</td>
+        <td>{{ r.perfect_weeks }} of {{ r.weeks }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 <section class="chart-section">
   <h2>Points left on bench</h2>
   <div class="chart-container chart-tall"><canvas id="chart-bench"></canvas></div>

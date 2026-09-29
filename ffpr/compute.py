@@ -10,6 +10,7 @@ from ffpr.models import (
     DraftPickGrade,
     DraftSummary,
     GameRecord,
+    LineupRow,
     Matchup,
     PFLeaderboardRow,
     PlayerMove,
@@ -19,6 +20,7 @@ from ffpr.models import (
     PreseasonRow,
     SeasonBoard,
     SeasonBoardEntry,
+    SeasonLineupRow,
     SeasonRecords,
     Team,
     TeamDraftGrade,
@@ -286,6 +288,103 @@ def compute_position_ranks(matchups: list[Matchup]) -> list[PositionRankRow]:
     return rows
 
 
+FLEX_ELIGIBILITY = {
+    "FLEX": {"RB", "WR", "TE"},
+    "SUPER_FLEX": {"QB", "RB", "WR", "TE"},
+    "REC_FLEX": {"WR", "TE"},
+    "WRRB_FLEX": {"RB", "WR"},
+    "IDP_FLEX": {"DL", "LB", "DB"},
+}
+NON_STARTING_SLOTS = {"BN", "IR", "TAXI"}
+
+
+def best_lineup(
+    players: list[PlayerScore], roster_positions: list[str], starter_ids: set[str]
+) -> list[PlayerScore]:
+    """The highest-scoring legal lineup these players could have formed.
+
+    Fixed slots take the best player left at their position: moving a better
+    player into a fixed slot can never lower the total. Flex slots are then
+    searched exhaustively, which stays exact when flex eligibilities overlap
+    (WRRB_FLEX with REC_FLEX) where filling them greedily is not. Every slot
+    with an eligible player gets filled, and on equal points the players the
+    manager actually started are kept, so a 0-for-0 bye swap never counts as
+    a mistake.
+    """
+    slots = [s for s in roster_positions if s not in NON_STARTING_SLOTS]
+    flexes = [FLEX_ELIGIBILITY[s] for s in slots if s in FLEX_ELIGIBILITY]
+    fixed = [s for s in slots if s not in FLEX_ELIGIBILITY]
+
+    def value(p: PlayerScore) -> tuple[float, bool]:
+        return (p.points, p.player_id in starter_ids)
+
+    remaining = sorted(players, key=value, reverse=True)
+    lineup: list[PlayerScore] = []
+    for slot in fixed:
+        pick = next((p for p in remaining if p.position == slot), None)
+        if pick is not None:
+            lineup.append(pick)
+            remaining.remove(pick)
+
+    # Only the top len(flexes) players at a position can ever reach a flex slot.
+    taken: dict[str, int] = {}
+    candidates = []
+    for p in remaining:
+        if any(p.position in e for e in flexes) and taken.get(p.position, 0) < len(flexes):
+            taken[p.position] = taken.get(p.position, 0) + 1
+            candidates.append(p)
+
+    best: tuple[tuple[float, int], list[PlayerScore]] = ((float("-inf"), 0), [])
+
+    def search(i: int, picked: list[PlayerScore]) -> None:
+        nonlocal best
+        if i == len(flexes):
+            key = (
+                round(sum(p.points for p in picked), 2),
+                sum(p.player_id in starter_ids for p in picked),
+            )
+            if key > best[0]:
+                best = (key, list(picked))
+            return
+        eligible = [p for p in candidates if p.position in flexes[i] and p not in picked]
+        if not eligible:
+            search(i + 1, picked)
+        for p in eligible:
+            picked.append(p)
+            search(i + 1, picked)
+            picked.pop()
+
+    search(0, [])
+    return lineup + best[1]
+
+
+def compute_lineup_efficiency(
+    matchups: list[Matchup], roster_positions: list[str]
+) -> list[LineupRow]:
+    """Each team's lineup against the best one its own roster allowed."""
+    rows = []
+    for m in sorted(matchups, key=lambda m: m.roster_id):
+        starter_ids = {p.player_id for p in m.starters}
+        optimal = best_lineup(m.starters + m.bench, roster_positions, starter_ids)
+        optimal_ids = {p.player_id for p in optimal}
+        rows.append(
+            LineupRow(
+                roster_id=m.roster_id,
+                actual=round(sum(p.points for p in m.starters), 2),
+                optimal=round(sum(p.points for p in optimal), 2),
+                should_have_started=sorted(
+                    (p for p in optimal if p.player_id not in starter_ids),
+                    key=lambda p: -p.points,
+                ),
+                should_have_sat=sorted(
+                    (p for p in m.starters if p.player_id not in optimal_ids),
+                    key=lambda p: p.points,
+                ),
+            )
+        )
+    return rows
+
+
 def compute_allplay_week(matchups: list[Matchup]) -> dict[int, int]:
     """Roster id -> number of the OTHER teams it outscored this week."""
     scores = [(m.roster_id, m.team_points) for m in matchups]
@@ -500,6 +599,7 @@ def build_week_summaries(
     league_average_match: bool,
     weights: dict[str, float],
     form_window: int,
+    roster_positions: list[str] | None = None,
 ) -> list[WeekSummary]:
     weeks = sorted(weeks_raw_matchups.keys())
     cumulative_win = dict.fromkeys(roster_ids, 0.0)
@@ -555,6 +655,11 @@ def build_week_summaries(
                 power_rankings=power_rankings,
                 roster_moves=roster_moves,
                 position_ranks=compute_position_ranks(matchups),
+                lineups=(
+                    compute_lineup_efficiency(matchups, roster_positions)
+                    if roster_positions
+                    else []
+                ),
             )
         )
 
@@ -776,6 +881,7 @@ def build_provisional_week_summary(
     raw_transactions: list[dict],
     rosters_by_id: dict[int, dict],
     players_map: dict,
+    roster_positions: list[str] | None = None,
 ) -> WeekSummary:
     """Awards/scores for the in-progress week, with no power rankings.
 
@@ -794,6 +900,7 @@ def build_provisional_week_summary(
         power_rankings=[],
         roster_moves=roster_moves,
         position_ranks=compute_position_ranks(matchups),
+        lineups=compute_lineup_efficiency(matchups, roster_positions) if roster_positions else [],
     )
 
 
@@ -945,4 +1052,19 @@ def build_season_board(weeks: list[WeekSummary], teams: dict[int, Team]) -> Seas
         crown_counts=crown_counts,
         pf_leaderboard=pf_leaderboard,
         records=records,
+        lineup_leaderboard=build_lineup_leaderboard(weeks),
     )
+
+
+def build_lineup_leaderboard(weeks: list[WeekSummary]) -> list[SeasonLineupRow]:
+    by_roster: dict[int, SeasonLineupRow] = {}
+    for wk in weeks:
+        for row in wk.lineups:
+            agg = by_roster.setdefault(
+                row.roster_id, SeasonLineupRow(row.roster_id, 0.0, 0.0, 0, 0)
+            )
+            agg.actual = round(agg.actual + row.actual, 2)
+            agg.optimal = round(agg.optimal + row.optimal, 2)
+            agg.weeks += 1
+            agg.perfect_weeks += row.left_on_bench <= 0.005
+    return sorted(by_roster.values(), key=lambda r: (-r.efficiency, r.roster_id))

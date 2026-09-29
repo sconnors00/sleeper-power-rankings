@@ -451,3 +451,76 @@ def test_compute_position_ranks_ties_share_rank():
 def test_compute_position_ranks_ignores_unknown_positions():
     rows = compute_position_ranks([_team(1, ("DL", 8.0), ("DEF", 6.0))])
     assert rows[0].points == {"QB": 0.0, "RB": 0.0, "WR": 0.0, "TE": 0.0, "K": 0.0, "DEF": 6.0}
+
+
+def _p(pid, pos, pts):
+    from ffpr.models import PlayerScore
+
+    return PlayerScore(pid, pid, pos, None, pts)
+
+
+def test_best_lineup_fills_fixed_then_flex_slots():
+    from ffpr.compute import best_lineup
+
+    players = [
+        _p("qb1", "QB", 20),
+        _p("qb2", "QB", 15),
+        _p("rb1", "RB", 10),
+        _p("rb2", "RB", 8),
+        _p("wr1", "WR", 12),
+        _p("wr2", "WR", 5),
+        _p("te1", "TE", 7),
+    ]
+    lineup = best_lineup(players, ["QB", "RB", "WR", "FLEX", "SUPER_FLEX", "BN"], set())
+    assert sorted(p.player_id for p in lineup) == ["qb1", "qb2", "rb1", "rb2", "wr1"]
+
+
+def test_best_lineup_exact_when_flex_slots_overlap():
+    """Greedy would put the WR in WRRB_FLEX and leave REC_FLEX the TE (11 pts)."""
+    from ffpr.compute import best_lineup
+
+    players = [_p("wr", "WR", 10), _p("rb", "RB", 9), _p("te", "TE", 1)]
+    lineup = best_lineup(players, ["WRRB_FLEX", "REC_FLEX"], set())
+    assert sum(p.points for p in lineup) == 19
+
+
+def test_best_lineup_fills_a_slot_even_when_negative():
+    from ffpr.compute import best_lineup
+
+    lineup = best_lineup([_p("d", "DEF", -3.0)], ["DEF"], {"d"})
+    assert [p.player_id for p in lineup] == ["d"]
+
+
+def test_lineup_efficiency_ignores_equal_point_swaps():
+    from ffpr.compute import compute_lineup_efficiency
+    from ffpr.models import Matchup
+
+    m = Matchup(1, 1, 1, None, 0.0, [_p("bye", "WR", 0.0)], [_p("benchbye", "WR", 0.0)])
+    row = compute_lineup_efficiency([m], ["WR"])[0]
+    assert row.left_on_bench == 0
+    assert row.should_have_started == [] and row.should_have_sat == []
+
+
+def test_lineup_efficiency_on_real_week(rosters, matchups_week5, players, league):
+    from ffpr.compute import compute_lineup_efficiency
+
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    matchups = parse_week_matchups(matchups_week5, 5, rosters_by_id, players)
+    rows = compute_lineup_efficiency(matchups, league["roster_positions"])
+    assert len(rows) == len(matchups)
+    for row in rows:
+        assert row.optimal >= row.actual
+        assert 0 < row.efficiency <= 1
+        if row.should_have_started:
+            assert row.should_have_started[0].points > row.should_have_sat[0].points
+    assert any(row.left_on_bench > 0 for row in rows)
+
+
+def test_lineup_swaps_flag_an_empty_slot():
+    from ffpr.models import LineupRow
+
+    row = LineupRow(1, 10.0, 30.0, [_p("a", "WR", 12.0), _p("b", "RB", 8.0)], [_p("c", "WR", 0.0)])
+    assert [(s.player_id, o.player_id if o else None) for s, o in row.swaps] == [
+        ("a", "c"),
+        ("b", None),
+    ]

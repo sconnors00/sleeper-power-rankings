@@ -239,6 +239,17 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
     blowouts = [_matchup_pair(wk, mid, teams) for mid in awards.biggest_blowout_matchup_ids]
     roster_moves_rows = [{"team": teams[m.roster_id], "moves": m} for m in wk.roster_moves]
 
+    # A lineup can only be judged once its games are played.
+    lineup_rows = []
+    costliest_lineup = None
+    if wk.lineups and wk.week != season.provisional_week:
+        lineup_rows = sorted(
+            ({"team": teams[row.roster_id], "row": row} for row in wk.lineups),
+            key=lambda e: (-e["row"].left_on_bench, e["team"].name),
+        )
+        if lineup_rows[0]["row"].left_on_bench > 0.005:
+            costliest_lineup = lineup_rows[0]
+
     # Before kickoff every total is 0.0 and every team "ties for 1st" -- noise.
     position_rank_rows = []
     position_rank_extremes = {}
@@ -260,6 +271,8 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
         "closest_matchups": closest,
         "blowout_matchups": blowouts,
         "roster_moves_rows": roster_moves_rows,
+        "lineup_rows": lineup_rows,
+        "costliest_lineup": costliest_lineup,
         "positions": POSITIONS,
         "position_rank_rows": position_rank_rows,
         "position_rank_extremes": position_rank_extremes,

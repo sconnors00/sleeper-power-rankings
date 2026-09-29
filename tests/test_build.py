@@ -21,6 +21,7 @@ def _make_season(rosters, users, matchups_week5, transactions_week5, players, le
         league_average_match=bool(league["settings"]["league_average_match"]),
         weights=WEIGHTS,
         form_window=3,
+        roster_positions=league["roster_positions"],
     )
     board = build_season_board(weeks, teams)
     return SeasonSummary(
@@ -311,3 +312,22 @@ def test_how_it_works_page_exists_before_week_one(tmp_path, teams_only_season):
     html = (out / "how-it-works.html").read_text()
     assert "How the rankings work" in html
     assert "Worked example" not in html
+
+
+def test_lineup_efficiency_on_week_and_season_pages(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+
+    week = (out / "weeks" / "week-5.html").read_text()
+    section = week.split("<h2>Lineup efficiency</h2>")[1].split("</section>")[0]
+    assert section.count("team-cell") == len(rosters)
+    worst = max(season.weeks[-1].lineups, key=lambda r: r.left_on_bench)
+    assert "Costliest lineup call" in week
+    assert f"{worst.left_on_bench:.2f}" in week
+
+    board = (out / "season.html").read_text()
+    assert "<h2>Lineup efficiency</h2>" in board
+    assert "of 1</td>" in board  # perfect weeks out of weeks played

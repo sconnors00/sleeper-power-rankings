@@ -91,6 +91,35 @@ class PositionRankRow:
 
 
 @dataclass
+class LineupRow:
+    roster_id: int
+    actual: float  # starters' points as the manager set the lineup
+    optimal: float  # best legal lineup from the same players
+    should_have_started: list[PlayerScore]  # benched players in the best lineup, best first
+    should_have_sat: list[PlayerScore]  # starters it left out, worst first
+
+    @property
+    def left_on_bench(self) -> float:
+        return self.optimal - self.actual
+
+    @property
+    def efficiency(self) -> float:
+        return self.actual / self.optimal if self.optimal > 0 else 1.0
+
+    @property
+    def swaps(self) -> list[tuple[PlayerScore, PlayerScore | None]]:
+        """Best benched player paired with worst misplaced starter, and so on.
+
+        None on the right means the player belonged in a slot left empty.
+        """
+        sat = self.should_have_sat
+        return [
+            (start, sat[i] if i < len(sat) else None)
+            for i, start in enumerate(self.should_have_started)
+        ]
+
+
+@dataclass
 class WeekSummary:
     week: int
     matchups: list[Matchup]
@@ -99,6 +128,7 @@ class WeekSummary:
     power_rankings: list[PowerRankRow]  # sorted by rank ascending
     roster_moves: list[TeamRosterMoves]  # only teams with at least one move
     position_ranks: list[PositionRankRow]  # one row per roster, roster_id order
+    lineups: list[LineupRow] = field(default_factory=list)  # empty without roster slots
 
 
 @dataclass
@@ -143,11 +173,29 @@ class SeasonRecords:
 
 
 @dataclass
+class SeasonLineupRow:
+    roster_id: int
+    actual: float
+    optimal: float
+    weeks: int
+    perfect_weeks: int  # weeks where the lineup set was already the best possible
+
+    @property
+    def left_on_bench(self) -> float:
+        return self.optimal - self.actual
+
+    @property
+    def efficiency(self) -> float:
+        return self.actual / self.optimal if self.optimal > 0 else 1.0
+
+
+@dataclass
 class SeasonBoard:
     log: list[SeasonBoardEntry]
     crown_counts: dict[int, int]
     pf_leaderboard: list[PFLeaderboardRow]  # sorted by PF descending
     records: SeasonRecords
+    lineup_leaderboard: list[SeasonLineupRow] = field(default_factory=list)  # best efficiency first
 
 
 @dataclass
