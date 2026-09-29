@@ -10,6 +10,8 @@ import random
 import statistics
 
 from ffpr.models import (
+    Acquisition,
+    AcquisitionSummary,
     DraftPickGrade,
     DraftSummary,
     GameRecord,
@@ -29,6 +31,8 @@ from ffpr.models import (
     Team,
     TeamDraftGrade,
     TeamRosterMoves,
+    TradeGrade,
+    TradeSide,
     WeekAwards,
     WeekSummary,
 )
@@ -1232,3 +1236,67 @@ def simulate_playoff_odds(
             )
         )
     return sorted(rows, key=lambda r: (-r.playoff_pct, -r.projected_wins, r.roster_id))
+
+
+# --- Pickup and trade grades ---
+
+
+def grade_acquisitions(
+    weeks_raw_transactions: dict[int, list[dict]],
+    weeks: list[WeekSummary],
+    players_map: dict,
+) -> AcquisitionSummary:
+    """Credit every add with what the acquiring team got out of the player.
+
+    The measure is points he scored in that team's starting lineup, from the
+    week of the move on -- bench points never counted toward a score. A
+    starter is credited to his team's most recent acquisition of him at or
+    before that week, so a player who changes hands is split correctly
+    between stints, and players a team drafted count toward nothing here.
+    """
+    acquisitions: dict[tuple[int, str], list[Acquisition]] = {}
+    trades: list[tuple[int, dict[int, TradeSide]]] = []
+    for week in sorted(weeks_raw_transactions):
+        txs = [t for t in weeks_raw_transactions[week] if t.get("status") == "complete"]
+        for tx in sorted(txs, key=lambda t: t.get("status_updated") or t.get("created") or 0):
+            move_type = tx.get("type") or "waiver"
+            faab = (tx.get("settings") or {}).get("waiver_bid") if move_type == "waiver" else None
+            sides: dict[int, TradeSide] = {}
+            for pid, rid in (tx.get("adds") or {}).items():
+                acq = Acquisition(
+                    week, rid, _player_score(pid, 0.0, players_map), move_type, faab, 0
+                )
+                acquisitions.setdefault((rid, pid), []).append(acq)
+                if move_type == "trade":
+                    sides.setdefault(rid, TradeSide(rid, [], [])).received.append(acq)
+            if move_type == "trade":
+                for rid in tx.get("roster_ids") or []:
+                    sides.setdefault(rid, TradeSide(rid, [], []))
+                for pick in tx.get("draft_picks") or []:
+                    side = sides.get(pick.get("owner_id"))
+                    if side is not None:
+                        side.picks.append(f"{pick.get('season')} Rd {pick.get('round')}")
+                trades.append((week, sides))
+
+    for wk in weeks:
+        for m in wk.matchups:
+            for p in m.starters:
+                stints = acquisitions.get((m.roster_id, p.player_id), [])
+                current = next((a for a in reversed(stints) if a.week <= wk.week), None)
+                if current is not None:
+                    current.player.points = round(current.player.points + p.points, 2)
+                    current.starts += 1
+
+    pickups = [
+        a
+        for stints in acquisitions.values()
+        for a in stints
+        if a.move_type in ("waiver", "free_agent")
+    ]
+    pickups.sort(key=lambda a: (-a.player.points, a.week, a.player.name))
+    graded = [
+        TradeGrade(week, sorted(sides.values(), key=lambda s: (-s.points, s.roster_id)))
+        for week, sides in trades
+    ]
+    graded.reverse()
+    return AcquisitionSummary(pickups=pickups, trades=graded)

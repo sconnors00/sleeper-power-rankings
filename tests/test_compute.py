@@ -599,3 +599,84 @@ def test_playoff_odds_lock_in_a_clinched_team(rosters, matchups_week5, players):
     last = {14: remaining[14]}
     rows = {r.roster_id: r for r in simulate_playoff_odds(weeks * 12, last, False, 6, sims=200)}
     assert rows[leader].playoff_pct == 1.0
+
+
+def _week(num, *team_starters):
+    from types import SimpleNamespace
+
+    from ffpr.models import Matchup
+
+    matchups = [
+        Matchup(num, rid, rid, None, sum(p.points for p in starters), list(starters), [])
+        for rid, starters in team_starters
+    ]
+    return SimpleNamespace(week=num, matchups=matchups)
+
+
+def test_grade_acquisitions_splits_credit_between_stints():
+    from ffpr.compute import grade_acquisitions
+
+    txs = {
+        1: [
+            {
+                "type": "waiver",
+                "status": "complete",
+                "adds": {"p1": 1},
+                "settings": {"waiver_bid": 10},
+            },
+            {
+                "type": "waiver",
+                "status": "failed",
+                "adds": {"p1": 3},
+                "settings": {"waiver_bid": 9},
+            },
+        ],
+        3: [
+            {
+                "type": "trade",
+                "status": "complete",
+                "adds": {"p1": 2},
+                "roster_ids": [1, 2],
+                "draft_picks": [{"season": "2027", "round": 2, "owner_id": 1}],
+            }
+        ],
+    }
+    weeks = [
+        _week(1, (1, [_p("p1", "WR", 10.0)])),
+        _week(2, (1, [_p("p1", "WR", 20.0)])),
+        _week(3, (2, [_p("p1", "WR", 30.0)]), (1, [])),
+        _week(4, (2, [])),  # benched: no credit
+    ]
+    summary = grade_acquisitions(txs, weeks, {})
+
+    assert [(a.roster_id, a.player.points, a.starts, a.faab) for a in summary.pickups] == [
+        (1, 30.0, 2, 10)
+    ]
+    [trade] = summary.trades
+    assert [s.roster_id for s in trade.sides] == [2, 1]
+    assert trade.sides[0].points == 30.0 and trade.sides[0].received[0].starts == 1
+    assert trade.sides[1].received == [] and trade.sides[1].picks == ["2027 Rd 2"]
+
+
+def test_grade_acquisitions_on_a_real_week(rosters, matchups_week5, transactions_week5, players):
+    from types import SimpleNamespace
+
+    from ffpr.compute import grade_acquisitions
+
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    matchups = parse_week_matchups(matchups_week5, 5, rosters_by_id, players)
+    summary = grade_acquisitions(
+        {5: transactions_week5}, [SimpleNamespace(week=5, matchups=matchups)], players
+    )
+    completed_adds = sum(
+        len(t.get("adds") or {})
+        for t in transactions_week5
+        if t["status"] == "complete" and t["type"] != "trade"
+    )
+    assert len(summary.pickups) == completed_adds
+    started = {(m.roster_id, p.player_id): p.points for m in matchups for p in m.starters}
+    for a in summary.pickups:
+        assert a.player.points == started.get((a.roster_id, a.player.player_id), 0.0)
+    [trade] = summary.trades
+    assert sorted(s.roster_id for s in trade.sides) == [1, 10]
+    assert all(len(s.received) == 3 for s in trade.sides)

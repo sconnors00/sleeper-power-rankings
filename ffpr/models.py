@@ -241,6 +241,39 @@ class DraftSummary:
 
 
 @dataclass
+class Acquisition:
+    week: int
+    roster_id: int  # the team that acquired the player
+    player: PlayerScore  # points = points this team started him for since he arrived
+    move_type: str  # "waiver", "free_agent" or "trade"
+    faab: int | None  # waiver bid, waiver adds only
+    starts: int  # weeks this team started him
+
+
+@dataclass
+class TradeSide:
+    roster_id: int
+    received: list[Acquisition]
+    picks: list[str]  # draft picks received, e.g. "2027 Rd 2"
+
+    @property
+    def points(self) -> float:
+        return sum(a.player.points for a in self.received)
+
+
+@dataclass
+class TradeGrade:
+    week: int
+    sides: list[TradeSide]  # most points since the trade first
+
+
+@dataclass
+class AcquisitionSummary:
+    pickups: list[Acquisition]  # waiver and free-agent adds, most starter points first
+    trades: list[TradeGrade]  # newest first
+
+
+@dataclass
 class PlayoffOddsRow:
     roster_id: int
     record: str  # current, median games included when the league plays them
@@ -273,3 +306,4 @@ class SeasonSummary:
     playoff_teams: int = 0
     playoff_byes: int = 0
     remaining_weeks: int = 0  # regular-season weeks the odds simulate
+    acquisitions: AcquisitionSummary | None = None

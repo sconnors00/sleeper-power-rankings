@@ -22,6 +22,7 @@ from ffpr.compute import (
     build_season_board,
     build_teams,
     build_week_summaries,
+    grade_acquisitions,
     grade_draft,
     playoff_byes,
     schedule_pairs,
@@ -331,6 +332,7 @@ def _build_season_summary(
         playoff_teams=league_obj["settings"].get("playoff_teams") or 0,
         playoff_byes=playoff_byes(league_obj["settings"].get("playoff_teams") or 0),
         remaining_weeks=len(remaining),
+        acquisitions=grade_acquisitions(transactions_raw, week_summaries, players),
     )
 
 

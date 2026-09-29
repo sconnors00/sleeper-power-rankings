@@ -365,3 +365,25 @@ def test_pct_hedges_the_extremes():
     from ffpr.build import _pct
 
     assert [_pct(0), _pct(0.4567), _pct(1)] == ["<0.1%", "45.7%", ">99.9%"]
+
+
+def test_season_page_grades_pickups_and_trades(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import grade_acquisitions
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.acquisitions = grade_acquisitions({5: transactions_week5}, season.weeks, players)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "season.html").read_text()
+
+    best = season.acquisitions.pickups[0]
+    pickups = html.split('id="pickups"')[1].split("</section>")[0]
+    assert best.player.name in pickups and f"{best.player.points:.2f}" in pickups
+    assert pickups.count("<tr>") <= 11  # header + at most ten
+
+    trades = html.split('id="trades"')[1].split("</section>")[0]
+    assert "Week 5" in trades
+    for side in season.acquisitions.trades[0].sides:
+        assert season.teams[side.roster_id].name in trades
