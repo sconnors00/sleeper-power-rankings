@@ -112,6 +112,7 @@ def build_teams(rosters: list[dict], users: list[dict]) -> dict[int, Team]:
             name=resolve_team_name(user, roster_id),
             avatar_url=resolve_avatar_url(user),
             color=TEAM_COLORS_LIGHT[i % len(TEAM_COLORS_LIGHT)],
+            owner_name=(user or {}).get("display_name"),
         )
     return teams
 
@@ -1341,11 +1342,13 @@ def build_rivalries(seasons: list[SeasonSummary]) -> list[Manager]:
     isn't a win over anyone.
     """
     meetings: dict[str, dict[str, list[Meeting]]] = {}
-    profile: dict[str, tuple[str, str]] = {}  # owner -> (name, color) from their latest season
+    # owner -> (Sleeper name, color) from their latest season; team names change
+    # every year, so the person's account name is what identifies them here
+    profile: dict[str, tuple[str, str]] = {}
     for s in sorted(seasons, key=lambda s: s.season, reverse=True):
         for team in s.teams.values():
             if team.owner_id:
-                profile.setdefault(team.owner_id, (team.name, team.color))
+                profile.setdefault(team.owner_id, (team.owner_name or team.name, team.color))
         for wk in s.weeks:
             pairs: dict[int, list[Matchup]] = {}
             for m in wk.matchups:

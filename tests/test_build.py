@@ -401,6 +401,11 @@ def test_rivalries_page(
 
     html = (out / "rivalries.html").read_text()
     assert html.count('<details class="rivalry">') == len(rivalries)
+    for team in season.teams.values():
+        if team.owner_name and team.owner_id in {m.owner_id for m in rivalries}:
+            assert team.owner_name in html
+            if team.name != team.owner_name:
+                assert team.name not in html
     assert "All-time standings" in html
     assert 'href="rivalries.html"' in (out / "index.html").read_text()
 

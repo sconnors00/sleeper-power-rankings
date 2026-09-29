@@ -767,3 +767,20 @@ def test_active_streak_needs_both_managers_still_in_the_league():
     hl = rivalry_highlights(build_rivalries([newer, older]))
     assert hl["streak"][0].owner_id == "cat" and hl["streak"][2] == 1
     assert hl["one_sided"][1].record == "5-0"  # history still counts for the other cards
+
+
+def test_build_teams_carries_sleeper_display_names(rosters, users):
+    teams = build_teams(rosters, users)
+    names = {u["user_id"]: u["display_name"] for u in users}
+    for team in teams.values():
+        assert team.owner_name == names.get(team.owner_id)
+
+
+def test_rivalries_use_sleeper_names_over_team_names():
+    from ffpr.compute import build_rivalries
+
+    season = _season("2025", {1: "ann", 2: "bob"}, (1, [(1, 1, 100.0), (1, 2, 90.0)]))
+    season.teams[1].owner_name = "AnnOnSleeper"
+    managers = {m.owner_id: m for m in build_rivalries([season])}
+    assert managers["ann"].name == "AnnOnSleeper"
+    assert managers["bob"].name == "bob-2025"  # no display name: fall back to the team
