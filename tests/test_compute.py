@@ -511,19 +511,30 @@ def test_lineup_efficiency_on_real_week(rosters, matchups_week5, players, league
     for row in rows:
         assert row.optimal >= row.actual
         assert 0 < row.efficiency <= 1
-        if row.should_have_started:
-            assert row.should_have_started[0].points > row.should_have_sat[0].points
+        for benched, starter in row.swaps:
+            if starter is not None and starter.position == benched.position:
+                assert benched.points >= starter.points
     assert any(row.left_on_bench > 0 for row in rows)
 
 
-def test_lineup_swaps_flag_an_empty_slot():
-    from ffpr.models import LineupRow
+def test_pair_swaps_flags_an_empty_slot():
+    from ffpr.compute import pair_swaps
 
-    row = LineupRow(1, 10.0, 30.0, [_p("a", "WR", 12.0), _p("b", "RB", 8.0)], [_p("c", "WR", 0.0)])
-    assert [(s.player_id, o.player_id if o else None) for s, o in row.swaps] == [
+    pairs = pair_swaps([_p("a", "WR", 12.0), _p("b", "RB", 8.0)], [_p("c", "WR", 0.0)])
+    assert [(i.player_id, o.player_id if o else None) for i, o in pairs] == [
         ("a", "c"),
         ("b", None),
     ]
+
+
+def test_pair_swaps_matches_like_for_like_first():
+    """Best-in/worst-out pairing read as "Engram for Dart", a downgrade."""
+    from ffpr.compute import pair_swaps
+
+    started = [_p("lawrence", "QB", 26.24), _p("engram", "TE", 13.30)]
+    sat = [_p("slayton", "WR", 4.10), _p("dart", "QB", 15.58)]
+    pairs = [(i.player_id, o.player_id) for i, o in pair_swaps(started, sat)]
+    assert pairs == [("lawrence", "dart"), ("engram", "slayton")]
 
 
 def test_playoff_byes_fill_to_a_power_of_two():

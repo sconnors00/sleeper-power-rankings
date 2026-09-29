@@ -370,6 +370,30 @@ def best_lineup(
     return lineup + best[1]
 
 
+def pair_swaps(
+    started: list[PlayerScore], sat: list[PlayerScore]
+) -> list[tuple[PlayerScore, PlayerScore | None]]:
+    """Match each player the best lineup adds with the starter he displaces.
+
+    Same-position swaps are matched first: eligibility depends only on
+    position, so the best lineup never benches a better player for a worse
+    one at the same position, and a like-for-like pair always reads as the
+    upgrade it is. Leftovers pair across positions (flex moves), best in with
+    worst out; an add with nobody to displace filled an empty slot.
+    """
+    ins = sorted(started, key=lambda p: -p.points)
+    outs = sorted(sat, key=lambda p: p.points)
+    pairs: list[tuple[PlayerScore, PlayerScore | None]] = []
+    for p in list(ins):
+        match = next((o for o in outs if o.position == p.position), None)
+        if match is not None:
+            pairs.append((p, match))
+            ins.remove(p)
+            outs.remove(match)
+    pairs += [(p, outs.pop(0) if outs else None) for p in ins]
+    return sorted(pairs, key=lambda pr: -(pr[0].points - (pr[1].points if pr[1] else 0.0)))
+
+
 def compute_lineup_efficiency(
     matchups: list[Matchup], roster_positions: list[str]
 ) -> list[LineupRow]:
@@ -379,19 +403,16 @@ def compute_lineup_efficiency(
         starter_ids = {p.player_id for p in m.starters}
         optimal = best_lineup(m.starters + m.bench, roster_positions, starter_ids)
         optimal_ids = {p.player_id for p in optimal}
+        started = [p for p in optimal if p.player_id not in starter_ids]
+        sat = [p for p in m.starters if p.player_id not in optimal_ids]
         rows.append(
             LineupRow(
                 roster_id=m.roster_id,
                 actual=round(sum(p.points for p in m.starters), 2),
                 optimal=round(sum(p.points for p in optimal), 2),
-                should_have_started=sorted(
-                    (p for p in optimal if p.player_id not in starter_ids),
-                    key=lambda p: -p.points,
-                ),
-                should_have_sat=sorted(
-                    (p for p in m.starters if p.player_id not in optimal_ids),
-                    key=lambda p: p.points,
-                ),
+                should_have_started=sorted(started, key=lambda p: -p.points),
+                should_have_sat=sorted(sat, key=lambda p: p.points),
+                swaps=pair_swaps(started, sat),
             )
         )
     return rows
@@ -1083,6 +1104,8 @@ def build_lineup_leaderboard(weeks: list[WeekSummary]) -> list[SeasonLineupRow]:
 
 
 # --- Playoff odds ---
+
+PLAYOFF_SIMS = 10_000
 
 
 def schedule_pairs(raw_matchups: list[dict]) -> list[tuple[int, int]]:

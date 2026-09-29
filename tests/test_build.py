@@ -410,3 +410,18 @@ def test_no_rivalries_page_without_rivalries(tmp_path, teams_only_season):
     render_site(teams_only_season, out)
     assert not (out / "rivalries.html").exists()
     assert "rivalries.html" not in (out / "index.html").read_text()
+
+
+def test_how_it_works_covers_the_new_features(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.playoff_teams, season.playoff_byes = 6, 2
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "how-it-works.html").read_text()
+    for anchor in ("playoff-odds", "lineups", "pickups", "rivalries"):
+        assert f'id="{anchor}"' in html
+    assert "10,000 times" in html
+    assert "top 6 make it, with the top 2 getting byes" in html
+    assert "league median" not in html.split('id="playoff-odds"')[1].split("</section>")[0]

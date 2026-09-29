@@ -97,6 +97,8 @@ class LineupRow:
     optimal: float  # best legal lineup from the same players
     should_have_started: list[PlayerScore]  # benched players in the best lineup, best first
     should_have_sat: list[PlayerScore]  # starters it left out, worst first
+    # benched player -> starter he should have replaced (None: an empty slot), biggest gain first
+    swaps: list[tuple[PlayerScore, PlayerScore | None]] = field(default_factory=list)
 
     @property
     def left_on_bench(self) -> float:
@@ -105,18 +107,6 @@ class LineupRow:
     @property
     def efficiency(self) -> float:
         return self.actual / self.optimal if self.optimal > 0 else 1.0
-
-    @property
-    def swaps(self) -> list[tuple[PlayerScore, PlayerScore | None]]:
-        """Best benched player paired with worst misplaced starter, and so on.
-
-        None on the right means the player belonged in a slot left empty.
-        """
-        sat = self.should_have_sat
-        return [
-            (start, sat[i] if i < len(sat) else None)
-            for i, start in enumerate(self.should_have_started)
-        ]
 
 
 @dataclass

@@ -16,6 +16,7 @@ from ffpr.build import render_site
 from ffpr.compute import (
     DEFAULT_FORM_WINDOW,
     DEFAULT_WEIGHTS,
+    PLAYOFF_SIMS,
     apply_official_records,
     build_preseason_rankings,
     build_provisional_week_summary,
@@ -151,9 +152,6 @@ def _build_preseason(
         prev_rosters,
         champion_roster_id,
     )
-
-
-PLAYOFF_SIMS = 10_000
 
 
 def _playoff_odds(

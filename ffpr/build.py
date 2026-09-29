@@ -9,7 +9,13 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from ffpr.compute import DEFAULT_FORM_WINDOW, DEFAULT_WEIGHTS, POSITIONS, rivalry_highlights
+from ffpr.compute import (
+    DEFAULT_FORM_WINDOW,
+    DEFAULT_WEIGHTS,
+    PLAYOFF_SIMS,
+    POSITIONS,
+    rivalry_highlights,
+)
 from ffpr.models import Manager, SeasonSummary
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -338,6 +344,9 @@ def _how_it_works_context(season: SeasonSummary) -> dict:
         "num_teams": len(season.teams),
         "example": example,
         "positions": POSITIONS,
+        "playoff_sims": PLAYOFF_SIMS,
+        "playoff_teams": season.playoff_teams,
+        "playoff_byes": season.playoff_byes,
     }
 
 

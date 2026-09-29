@@ -93,6 +93,30 @@
   <p>Each week page also ranks every team at {% for p in positions %}{{ p }}{% if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %}: the starters' points at that position, ranked 1&ndash;{{ num_teams }} across the league. Bench points don't count. Starters count at their real position whatever slot they filled, so a FLEX receiver counts as WR and a team starting two QBs in the superflex gets both in its QB total. Teams on the same total share a rank. The week's best at each position is shown in green and the worst in red.</p>
 </section>
 
+<section id="playoff-odds">
+  <h2>Playoff odds</h2>
+  <p>The Season page plays out the rest of the regular season {{ "{:,}".format(playoff_sims) }} times and counts how often each team makes the playoffs{% if playoff_byes %}, earns a first-round bye,{% endif %} or finishes as the #1 seed. Every remaining game on the real schedule is simulated{% if league_average_match %}, plus each week's game against the league median{% endif %}. Standings go by wins, then total points{% if playoff_teams %}, and the top {{ playoff_teams }} make it{% if playoff_byes %}, with the top {{ playoff_byes }} getting byes{% endif %}{% endif %}. In a season with divisions, division winners are seeded ahead of the wild cards, which is how this league's 2022&ndash;2024 brackets were drawn.</p>
+  <p>Each team's weekly score is modeled from its results so far, and the model is careful not to over-read a hot start. Week-to-week swings are measured from how much teams' own scores bounce around. Only the part of a team's gap from the league average that luck can't explain is treated as real, which is most of it by November but much less in September. Each simulated season also re-rolls how good every team really is before playing it out, so early-season odds stay suitably unsure.</p>
+  <p>At the extremes the odds read &ldquo;&lt;0.1%&rdquo; or &ldquo;&gt;99.9%&rdquo;: zero hits in {{ "{:,}".format(playoff_sims) }} tries means very unlikely, not mathematically eliminated.</p>
+</section>
+
+<section id="lineups">
+  <h2>Lineup efficiency</h2>
+  <p>For every finished week, the site works out the best lineup each team could have set from its own roster. Every starting slot, flex spots included, gets the highest-scoring player who's eligible for it. It then compares that with the lineup the manager actually played. <strong>Missed points</strong> is the difference, and <strong>efficiency</strong> is points scored divided by the best possible. Players on IR or the taxi squad aren't counted, since they couldn't have started, and eligibility goes by each player's listed position.</p>
+  <p>A benched player who scored exactly as much as the starter he'd have replaced isn't counted as a mistake, so two players both on bye never show up as a bad call. The week's biggest miss wins the <em>Costliest lineup call</em> award.</p>
+</section>
+
+<section id="pickups">
+  <h2>Pickups and trades</h2>
+  <p>Every waiver claim, free-agent pickup, and traded player is credited with the points he has scored in his new team's starting lineup since the week he arrived. Bench points don't count, because they never counted toward a score. If a player changes teams again, each team gets credit only for its own stretch with him. Players a team drafted aren't graded here; that's what the draft grades are for.</p>
+  <p>Trades compare each side's total. Draft picks that changed hands are listed but can't be scored until they're used.</p>
+</section>
+
+<section id="rivalries">
+  <h2>Rivalries</h2>
+  <p>The Rivalries page keeps every manager's head-to-head record against every other manager, across all seasons on the site, regular season only. A record follows the person's Sleeper account rather than the roster, so a manager who takes over an orphaned team starts from scratch instead of inheriting the old owner's history.{% if league_average_match %} Games against the league median don't count, since beating the median isn't beating anyone.{% endif %} <em>Most one-sided</em> and <em>most even</em> only consider rivalries with at least four meetings.</p>
+</section>
+
 {% if has_draft %}
 <section id="draft">
   <h2>Draft grades</h2>

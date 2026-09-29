@@ -186,7 +186,7 @@
       {% for side in trade.sides %}
       <tr>
         <td class="team-cell"><span class="team-swatch" style="background:{{ teams[side.roster_id].color }}"></span>{{ teams[side.roster_id].name }}</td>
-        <td>{% for a in side.received %}{{ a.player.name }} ({{ a.player.points | fmt2 }} in {{ a.starts }} start{{ "s" if a.starts != 1 }}){% if not loop.last or side.picks %}, {% endif %}{% endfor %}{% for pk in side.picks %}{{ pk }} pick{% if not loop.last %}, {% endif %}{% endfor %}{% if not side.received and not side.picks %}&mdash;{% endif %}</td>
+        <td>{% for a in side.received %}{{ a.player.name }} ({% if a.starts %}{{ a.player.points | fmt2 }} in {{ a.starts }} start{{ "s" if a.starts != 1 }}{% else %}no starts yet{% endif %}){% if not loop.last or side.picks %}, {% endif %}{% endfor %}{% for pk in side.picks %}{{ pk }} pick{% if not loop.last %}, {% endif %}{% endfor %}{% if not side.received and not side.picks %}&mdash;{% endif %}</td>
         <td>{% if loop.first and lead > 0.005 %}<strong class="up">{{ side.points | fmt2 }}</strong>{% else %}{{ side.points | fmt2 }}{% endif %}</td>
       </tr>
       {% endfor %}
