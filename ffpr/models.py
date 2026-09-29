@@ -12,6 +12,7 @@ class Team:
     name: str
     avatar_url: str | None
     color: str
+    owner_name: str | None = None  # the manager's Sleeper display name
 
 
 @dataclass
@@ -322,7 +323,7 @@ class HeadToHead:
 @dataclass
 class Manager:
     owner_id: str
-    name: str  # their team name in the latest season they played
+    name: str  # Sleeper display name as of the latest season they played
     color: str
     seasons: list[str]  # newest first
     rivals: list[HeadToHead]  # most meetings first
