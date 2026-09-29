@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Rivalries &middot; {{ league_name }}{% endblock %}
+{% block content %}
+
+<h1 class="page-title">Rivalries</h1>
+
+<p class="lede">Head-to-head records between managers across every season on this site ({{ all_seasons | min }}&ndash;{{ all_seasons | max }}), regular season only. A record follows the manager, not the roster. <a href="how-it-works.html#rivalries">How this works</a></p>
+
+{% set one_sided, even, streak = highlights.one_sided, highlights.even, highlights.streak %}
+{% if one_sided or even or streak %}
+<section class="awards-grid">
+  {% if one_sided %}
+  {% set m, h = one_sided[0], one_sided[1] %}
+  <div class="award-card">
+    <h3>Most one-sided</h3>
+    <p class="award-value">{{ h.record }}</p>
+    <p class="award-teams">{{ m.name }} over {{ by_id[h.opponent_id].name }}</p>
+  </div>
+  {% endif %}
+  {% if even %}
+  {% set m, h = even[0], even[1] %}
+  <div class="award-card">
+    <h3>Most even</h3>
+    <p class="award-value">{{ h.record }}</p>
+    <p class="award-teams">{{ m.name }} vs {{ by_id[h.opponent_id].name }}</p>
+  </div>
+  {% endif %}
+  {% if streak %}
+  {% set m, h, run = streak %}
+  {% set since = h.meetings[-run] %}
+  <div class="award-card award-good">
+    <h3>Longest active streak</h3>
+    <p class="award-value">{{ run }} straight</p>
+    <p class="award-teams">{{ m.name }} over {{ by_id[h.opponent_id].name }}, since {{ since.season }} Wk {{ since.week }}</p>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section>
+  <h2>All-time standings</h2>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>#</th><th>Manager</th><th>Seasons</th><th>Record</th><th>Win %</th></tr></thead>
+    <tbody>
+      {% for m in managers %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ m.color }}"></span>{{ m.name }}</td>
+        <td>{{ m.seasons | length }}</td>
+        <td>{{ m.wins }}-{{ m.losses }}{% if m.ties %}-{{ m.ties }}{% endif %}</td>
+        <td>{{ "%.1f" | format(m.win_pct * 100) }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Head to head</h2>
+  <p class="note">Tap a manager to see their record against everyone else.</p>
+  {% for m in managers %}
+  <details class="rivalry">
+    <summary><span class="team-swatch" style="background:{{ m.color }}"></span> {{ m.name }} <span class="note-inline">{{ m.wins }}-{{ m.losses }}{% if m.ties %}-{{ m.ties }}{% endif %}</span></summary>
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Opponent</th><th>Record</th><th>PF</th><th>PA</th><th>Streak</th><th>Last meeting</th></tr></thead>
+      <tbody>
+        {% for h in m.rivals %}
+        {% set opp = by_id[h.opponent_id] %}
+        {% set last = h.meetings[-1] %}
+        {% set result, run = h.streak %}
+        <tr>
+          <td class="team-cell"><span class="team-swatch" style="background:{{ opp.color }}"></span>{{ opp.name }}</td>
+          <td><strong{% if h.wins > h.losses %} class="up"{% elif h.wins < h.losses %} class="down"{% endif %}>{{ h.record }}</strong></td>
+          <td>{{ h.points_for | fmt2 }}</td>
+          <td>{{ h.points_against | fmt2 }}</td>
+          <td>{{ result }}{{ run }}</td>
+          <td>{{ last.season }} Wk {{ last.week }}: {{ last.result }} {{ last.points_for | fmt2 }}&ndash;{{ last.points_against | fmt2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endfor %}
+</section>
+
+{% endblock %}

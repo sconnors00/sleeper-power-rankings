@@ -16,13 +16,19 @@ from ffpr.build import render_site
 from ffpr.compute import (
     DEFAULT_FORM_WINDOW,
     DEFAULT_WEIGHTS,
+    PLAYOFF_SIMS,
     apply_official_records,
     build_preseason_rankings,
     build_provisional_week_summary,
+    build_rivalries,
     build_season_board,
     build_teams,
     build_week_summaries,
+    grade_acquisitions,
     grade_draft,
+    playoff_byes,
+    schedule_pairs,
+    simulate_playoff_odds,
 )
 from ffpr.models import PreseasonRow, SeasonSummary
 from ffpr.sleeper import SleeperClient, SleeperError
@@ -148,6 +154,49 @@ def _build_preseason(
     )
 
 
+def _playoff_odds(
+    client: SleeperClient,
+    league_obj: dict,
+    season: str,
+    rosters: list[dict],
+    week_summaries: list,
+    through_week: int,
+) -> tuple[list, dict[int, list[tuple[int, int]]]]:
+    """Odds and the remaining schedule they simulate, or nothing.
+
+    Best-effort: a failed schedule fetch just means no odds this build.
+    """
+    settings = league_obj["settings"]
+    playoff_teams = settings.get("playoff_teams") or 0
+    if not week_summaries or not playoff_teams:
+        return [], {}
+    try:
+        remaining = {
+            wk: pairs
+            for wk in range(through_week + 1, settings["playoff_week_start"])
+            if (
+                pairs := schedule_pairs(
+                    client.get_matchups(league_obj["league_id"], season, wk, completed=False)
+                )
+            )
+        }
+    except (SleeperError, httpx.HTTPError):
+        return [], {}
+    divisions = None
+    if settings.get("divisions"):
+        divisions = {r["roster_id"]: (r.get("settings") or {}).get("division") for r in rosters}
+    odds = simulate_playoff_odds(
+        week_summaries,
+        remaining,
+        bool(settings.get("league_average_match", 0)),
+        playoff_teams,
+        divisions,
+        sims=PLAYOFF_SIMS,
+        seed=int(season) if season.isdigit() else 0,
+    )
+    return odds, remaining
+
+
 def _walk_previous_league_ids(client: SleeperClient, league_obj: dict) -> list[str]:
     """Every earlier league_id in the renewal chain, most recent first.
 
@@ -226,6 +275,7 @@ def _build_season_summary(
         league_average_match,
         weights,
         form_window,
+        roster_positions=league_obj["roster_positions"],
     )
     if week_summaries:
         apply_official_records(week_summaries[-1].power_rankings, rosters_by_id)
@@ -240,9 +290,15 @@ def _build_season_summary(
             if raw:
                 raw_tx = client.get_transactions(league_id, season, candidate, completed=False)
                 provisional_week_summary = build_provisional_week_summary(
-                    candidate, raw, raw_tx, rosters_by_id, players
+                    candidate, raw, raw_tx, rosters_by_id, players, league_obj["roster_positions"]
                 )
                 provisional_week_num = candidate
+
+    playoff_odds, remaining = ([], {})
+    if is_current_season:
+        playoff_odds, remaining = _playoff_odds(
+            client, league_obj, season, rosters, week_summaries, through_week
+        )
 
     draft_data = _fetch_draft(client, league_obj)
     draft_summary = None
@@ -270,6 +326,12 @@ def _build_season_summary(
         weights=weights,
         form_window=form_window,
         league_average_match=league_average_match,
+        playoff_odds=playoff_odds,
+        playoff_odds_sims=PLAYOFF_SIMS if playoff_odds else 0,
+        playoff_teams=league_obj["settings"].get("playoff_teams") or 0,
+        playoff_byes=playoff_byes(league_obj["settings"].get("playoff_teams") or 0),
+        remaining_weeks=len(remaining),
+        acquisitions=grade_acquisitions(transactions_raw, week_summaries, players),
     )
 
 
@@ -307,8 +369,11 @@ def build(
 
     all_summaries = [season_summary, *past_summaries]
     all_seasons = [s.season for s in all_summaries]
+    rivalries = build_rivalries(all_summaries)
 
-    render_site(season_summary, SITE_DIR, site_url=site_url, all_seasons=all_seasons)
+    render_site(
+        season_summary, SITE_DIR, site_url=site_url, all_seasons=all_seasons, rivalries=rivalries
+    )
     for s in all_summaries:
         render_site(
             s,
@@ -316,6 +381,7 @@ def build(
             site_url=site_url,
             all_seasons=all_seasons,
             site_root_prefix="../",
+            rivalries=rivalries,
         )
 
     msg = f"Built site/ through week {season_summary.through_week}"

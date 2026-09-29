@@ -451,3 +451,301 @@ def test_compute_position_ranks_ties_share_rank():
 def test_compute_position_ranks_ignores_unknown_positions():
     rows = compute_position_ranks([_team(1, ("DL", 8.0), ("DEF", 6.0))])
     assert rows[0].points == {"QB": 0.0, "RB": 0.0, "WR": 0.0, "TE": 0.0, "K": 0.0, "DEF": 6.0}
+
+
+def _p(pid, pos, pts):
+    from ffpr.models import PlayerScore
+
+    return PlayerScore(pid, pid, pos, None, pts)
+
+
+def test_best_lineup_fills_fixed_then_flex_slots():
+    from ffpr.compute import best_lineup
+
+    players = [
+        _p("qb1", "QB", 20),
+        _p("qb2", "QB", 15),
+        _p("rb1", "RB", 10),
+        _p("rb2", "RB", 8),
+        _p("wr1", "WR", 12),
+        _p("wr2", "WR", 5),
+        _p("te1", "TE", 7),
+    ]
+    lineup = best_lineup(players, ["QB", "RB", "WR", "FLEX", "SUPER_FLEX", "BN"], set())
+    assert sorted(p.player_id for p in lineup) == ["qb1", "qb2", "rb1", "rb2", "wr1"]
+
+
+def test_best_lineup_exact_when_flex_slots_overlap():
+    """Greedy would put the WR in WRRB_FLEX and leave REC_FLEX the TE (11 pts)."""
+    from ffpr.compute import best_lineup
+
+    players = [_p("wr", "WR", 10), _p("rb", "RB", 9), _p("te", "TE", 1)]
+    lineup = best_lineup(players, ["WRRB_FLEX", "REC_FLEX"], set())
+    assert sum(p.points for p in lineup) == 19
+
+
+def test_best_lineup_fills_a_slot_even_when_negative():
+    from ffpr.compute import best_lineup
+
+    lineup = best_lineup([_p("d", "DEF", -3.0)], ["DEF"], {"d"})
+    assert [p.player_id for p in lineup] == ["d"]
+
+
+def test_lineup_efficiency_ignores_equal_point_swaps():
+    from ffpr.compute import compute_lineup_efficiency
+    from ffpr.models import Matchup
+
+    m = Matchup(1, 1, 1, None, 0.0, [_p("bye", "WR", 0.0)], [_p("benchbye", "WR", 0.0)])
+    row = compute_lineup_efficiency([m], ["WR"])[0]
+    assert row.left_on_bench == 0
+    assert row.should_have_started == [] and row.should_have_sat == []
+
+
+def test_lineup_efficiency_on_real_week(rosters, matchups_week5, players, league):
+    from ffpr.compute import compute_lineup_efficiency
+
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    matchups = parse_week_matchups(matchups_week5, 5, rosters_by_id, players)
+    rows = compute_lineup_efficiency(matchups, league["roster_positions"])
+    assert len(rows) == len(matchups)
+    for row in rows:
+        assert row.optimal >= row.actual
+        assert 0 < row.efficiency <= 1
+        for benched, starter in row.swaps:
+            if starter is not None and starter.position == benched.position:
+                assert benched.points >= starter.points
+    assert any(row.left_on_bench > 0 for row in rows)
+
+
+def test_pair_swaps_flags_an_empty_slot():
+    from ffpr.compute import pair_swaps
+
+    pairs = pair_swaps([_p("a", "WR", 12.0), _p("b", "RB", 8.0)], [_p("c", "WR", 0.0)])
+    assert [(i.player_id, o.player_id if o else None) for i, o in pairs] == [
+        ("a", "c"),
+        ("b", None),
+    ]
+
+
+def test_pair_swaps_matches_like_for_like_first():
+    """Best-in/worst-out pairing read as "Engram for Dart", a downgrade."""
+    from ffpr.compute import pair_swaps
+
+    started = [_p("lawrence", "QB", 26.24), _p("engram", "TE", 13.30)]
+    sat = [_p("slayton", "WR", 4.10), _p("dart", "QB", 15.58)]
+    pairs = [(i.player_id, o.player_id) for i, o in pair_swaps(started, sat)]
+    assert pairs == [("lawrence", "dart"), ("engram", "slayton")]
+
+
+def test_playoff_byes_fill_to_a_power_of_two():
+    from ffpr.compute import playoff_byes
+
+    assert [playoff_byes(n) for n in (4, 6, 7, 8)] == [0, 2, 1, 0]
+
+
+def test_seed_playoffs_by_wins_then_points_for():
+    from ffpr.compute import seed_playoffs
+
+    wins = {1: 5, 2: 5, 3: 4, 4: 6}
+    pf = {1: 400, 2: 500, 3: 900, 4: 300}
+    assert seed_playoffs(wins, pf, 3) == [4, 2, 1]
+
+
+def test_seed_playoffs_division_winners_first():
+    """2024: roster 6 won its division and took a bye over wild card roster 8."""
+    from ffpr.compute import seed_playoffs
+
+    wins = {9: 9, 8: 9, 6: 9, 7: 9, 11: 9, 10: 7}
+    pf = {9: 2186.71, 8: 2168.44, 6: 2152.15, 7: 2126.81, 11: 2026.03, 10: 2169.95}
+    divisions = {9: 3, 8: 3, 6: 2, 7: 3, 11: 1, 10: 2}
+    assert seed_playoffs(wins, pf, 6, divisions) == [9, 6, 11, 8, 7, 10]
+
+
+def _odds_inputs(rosters, matchups_week5, players):
+    from ffpr.compute import build_week_summaries, schedule_pairs
+
+    weeks = build_week_summaries(
+        [r["roster_id"] for r in rosters],
+        {5: matchups_week5},
+        {},
+        {r["roster_id"]: r for r in rosters},
+        players,
+        league_average_match=False,
+        weights=WEIGHTS,
+        form_window=3,
+    )
+    pairs = schedule_pairs(matchups_week5)
+    return weeks, {wk: pairs for wk in range(6, 15)}
+
+
+def test_playoff_odds_are_consistent(rosters, matchups_week5, players):
+    from ffpr.compute import simulate_playoff_odds
+
+    weeks, remaining = _odds_inputs(rosters, matchups_week5, players)
+    rows = simulate_playoff_odds(weeks, remaining, False, 6, sims=400, seed=1)
+    assert len(rows) == len(rosters)
+    assert abs(sum(r.playoff_pct for r in rows) - 6) < 1e-9
+    assert abs(sum(r.bye_pct for r in rows) - 2) < 1e-9
+    assert abs(sum(r.top_seed_pct for r in rows) - 1) < 1e-9
+    assert rows == simulate_playoff_odds(weeks, remaining, False, 6, sims=400, seed=1)
+    # 1 win so far + 9 games, one win per game across the league
+    assert abs(sum(r.projected_wins for r in rows) - 6 * 10) < 1e-6
+
+
+def test_playoff_odds_count_the_median_game(rosters, matchups_week5, players):
+    from ffpr.compute import simulate_playoff_odds
+
+    weeks, remaining = _odds_inputs(rosters, matchups_week5, players)
+    rows = simulate_playoff_odds(weeks, remaining, True, 6, sims=200, seed=1)
+    # every week is now worth 12 wins: 6 head-to-head + 6 against the median
+    assert abs(sum(r.projected_wins for r in rows) - 12 * 10) < 1e-6
+    assert all("-" in r.record for r in rows)
+
+
+def test_playoff_odds_lock_in_a_clinched_team(rosters, matchups_week5, players):
+    from ffpr.compute import simulate_playoff_odds
+
+    weeks, remaining = _odds_inputs(rosters, matchups_week5, players)
+    leader = max(weeks[0].matchups, key=lambda m: m.team_points).roster_id
+    last = {14: remaining[14]}
+    rows = {r.roster_id: r for r in simulate_playoff_odds(weeks * 12, last, False, 6, sims=200)}
+    assert rows[leader].playoff_pct == 1.0
+
+
+def _week(num, *team_starters):
+    from types import SimpleNamespace
+
+    from ffpr.models import Matchup
+
+    matchups = [
+        Matchup(num, rid, rid, None, sum(p.points for p in starters), list(starters), [])
+        for rid, starters in team_starters
+    ]
+    return SimpleNamespace(week=num, matchups=matchups)
+
+
+def test_grade_acquisitions_splits_credit_between_stints():
+    from ffpr.compute import grade_acquisitions
+
+    txs = {
+        1: [
+            {
+                "type": "waiver",
+                "status": "complete",
+                "adds": {"p1": 1},
+                "settings": {"waiver_bid": 10},
+            },
+            {
+                "type": "waiver",
+                "status": "failed",
+                "adds": {"p1": 3},
+                "settings": {"waiver_bid": 9},
+            },
+        ],
+        3: [
+            {
+                "type": "trade",
+                "status": "complete",
+                "adds": {"p1": 2},
+                "roster_ids": [1, 2],
+                "draft_picks": [{"season": "2027", "round": 2, "owner_id": 1}],
+            }
+        ],
+    }
+    weeks = [
+        _week(1, (1, [_p("p1", "WR", 10.0)])),
+        _week(2, (1, [_p("p1", "WR", 20.0)])),
+        _week(3, (2, [_p("p1", "WR", 30.0)]), (1, [])),
+        _week(4, (2, [])),  # benched: no credit
+    ]
+    summary = grade_acquisitions(txs, weeks, {})
+
+    assert [(a.roster_id, a.player.points, a.starts, a.faab) for a in summary.pickups] == [
+        (1, 30.0, 2, 10)
+    ]
+    [trade] = summary.trades
+    assert [s.roster_id for s in trade.sides] == [2, 1]
+    assert trade.sides[0].points == 30.0 and trade.sides[0].received[0].starts == 1
+    assert trade.sides[1].received == [] and trade.sides[1].picks == ["2027 Rd 2"]
+
+
+def test_grade_acquisitions_on_a_real_week(rosters, matchups_week5, transactions_week5, players):
+    from types import SimpleNamespace
+
+    from ffpr.compute import grade_acquisitions
+
+    rosters_by_id = {r["roster_id"]: r for r in rosters}
+    matchups = parse_week_matchups(matchups_week5, 5, rosters_by_id, players)
+    summary = grade_acquisitions(
+        {5: transactions_week5}, [SimpleNamespace(week=5, matchups=matchups)], players
+    )
+    completed_adds = sum(
+        len(t.get("adds") or {})
+        for t in transactions_week5
+        if t["status"] == "complete" and t["type"] != "trade"
+    )
+    assert len(summary.pickups) == completed_adds
+    started = {(m.roster_id, p.player_id): p.points for m in matchups for p in m.starters}
+    for a in summary.pickups:
+        assert a.player.points == started.get((a.roster_id, a.player.player_id), 0.0)
+    [trade] = summary.trades
+    assert sorted(s.roster_id for s in trade.sides) == [1, 10]
+    assert all(len(s.received) == 3 for s in trade.sides)
+
+
+def _season(year, owners, *weeks):
+    """weeks: (week, [(matchup_id, roster_id, points), ...])"""
+    from types import SimpleNamespace
+
+    from ffpr.models import Matchup, Team
+
+    teams = {
+        rid: Team(rid, owner, f"{owner}-{year}", None, "#000") for rid, owner in owners.items()
+    }
+    return SimpleNamespace(
+        season=year,
+        teams=teams,
+        weeks=[
+            SimpleNamespace(
+                week=num,
+                matchups=[Matchup(num, mid, rid, None, pts, [], []) for mid, rid, pts in games],
+            )
+            for num, games in weeks
+        ],
+    )
+
+
+def test_rivalries_follow_the_manager_not_the_roster():
+    from ffpr.compute import build_rivalries
+
+    older = _season("2024", {1: "ann", 2: "bob"}, (1, [(1, 1, 100.0), (1, 2, 90.0)]))
+    # roster 1 changed hands: 'cat' must not inherit ann's record
+    newer = _season(
+        "2025",
+        {1: "cat", 2: "bob"},
+        (1, [(1, 1, 80.0), (1, 2, 95.0)]),
+        (2, [(1, 1, 70.0), (1, 2, 60.0)]),
+    )
+    managers = {m.owner_id: m for m in build_rivalries([newer, older])}
+
+    bob = {h.opponent_id: h for h in managers["bob"].rivals}
+    assert bob["ann"].record == "0-1"
+    assert bob["cat"].record == "1-1"
+    assert managers["ann"].seasons == ["2024"]
+    assert managers["bob"].seasons == ["2025", "2024"]
+    assert managers["bob"].name == "bob-2025"  # latest team name
+    assert bob["cat"].streak == ("L", 1)
+
+
+def test_rivalry_highlights():
+    from ffpr.compute import build_rivalries, rivalry_highlights
+
+    weeks = [
+        (w, [(1, 1, 100.0 + w), (1, 2, 90.0), (2, 3, 80.0), (2, 4, 80.0 + (w % 2) * 20)])
+        for w in range(1, 7)
+    ]
+    season = _season("2025", {1: "ann", 2: "bob", 3: "cat", 4: "dan"}, *weeks)
+    hl = rivalry_highlights(build_rivalries([season]))
+    assert hl["one_sided"][0].owner_id == "ann" and hl["one_sided"][1].record == "6-0"
+    assert hl["even"][1].record in ("3-0-3", "0-3-3")
+    assert hl["streak"][0].owner_id == "ann" and hl["streak"][2] == 6

@@ -9,8 +9,14 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from ffpr.compute import DEFAULT_FORM_WINDOW, DEFAULT_WEIGHTS, POSITIONS
-from ffpr.models import SeasonSummary
+from ffpr.compute import (
+    DEFAULT_FORM_WINDOW,
+    DEFAULT_WEIGHTS,
+    PLAYOFF_SIMS,
+    POSITIONS,
+    rivalry_highlights,
+)
+from ffpr.models import Manager, SeasonSummary
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = PACKAGE_ROOT / "templates"
@@ -24,6 +30,16 @@ def _fmt2(value: float) -> str:
     return f"{value:.2f}"
 
 
+def _pct(share: float) -> str:
+    """A simulated probability. The extremes are hedged: 0 of 10,000 runs is
+    unlikely, not impossible, since clinching isn't worked out exactly."""
+    if share <= 0:
+        return "<0.1%"
+    if share >= 1:
+        return ">99.9%"
+    return f"{share:.1%}"
+
+
 def _build_jinja_env() -> Environment:
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -32,6 +48,7 @@ def _build_jinja_env() -> Environment:
         lstrip_blocks=True,
     )
     env.filters["fmt2"] = _fmt2
+    env.filters["pct"] = _pct
     return env
 
 
@@ -239,6 +256,17 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
     blowouts = [_matchup_pair(wk, mid, teams) for mid in awards.biggest_blowout_matchup_ids]
     roster_moves_rows = [{"team": teams[m.roster_id], "moves": m} for m in wk.roster_moves]
 
+    # A lineup can only be judged once its games are played.
+    lineup_rows = []
+    costliest_lineup = None
+    if wk.lineups and wk.week != season.provisional_week:
+        lineup_rows = sorted(
+            ({"team": teams[row.roster_id], "row": row} for row in wk.lineups),
+            key=lambda e: (-e["row"].left_on_bench, e["team"].name),
+        )
+        if lineup_rows[0]["row"].left_on_bench > 0.005:
+            costliest_lineup = lineup_rows[0]
+
     # Before kickoff every total is 0.0 and every team "ties for 1st" -- noise.
     position_rank_rows = []
     position_rank_extremes = {}
@@ -260,6 +288,8 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
         "closest_matchups": closest,
         "blowout_matchups": blowouts,
         "roster_moves_rows": roster_moves_rows,
+        "lineup_rows": lineup_rows,
+        "costliest_lineup": costliest_lineup,
         "positions": POSITIONS,
         "position_rank_rows": position_rank_rows,
         "position_rank_extremes": position_rank_extremes,
@@ -314,6 +344,9 @@ def _how_it_works_context(season: SeasonSummary) -> dict:
         "num_teams": len(season.teams),
         "example": example,
         "positions": POSITIONS,
+        "playoff_sims": PLAYOFF_SIMS,
+        "playoff_teams": season.playoff_teams,
+        "playoff_byes": season.playoff_byes,
     }
 
 
@@ -323,6 +356,7 @@ def render_site(
     site_url: str = "",
     all_seasons: list[str] | None = None,
     site_root_prefix: str = "",
+    rivalries: list[Manager] | None = None,
 ) -> None:
     """Render one season's site into output_dir.
 
@@ -356,6 +390,7 @@ def render_site(
         "season_year": season.season,
         "has_draft": season.draft is not None,
         "has_season": bool(season.weeks),
+        "has_rivalries": bool(rivalries),
         "all_seasons": all_seasons or [season.season],
         "site_root_prefix": site_root_prefix,
         "year_url": _year_url,
@@ -388,6 +423,17 @@ def render_site(
             **common, asset_prefix="../", teams=season.teams, records=season.season_board.records
         )
         (weeks_dir / f"week-{season.playoff_week_start}.html").write_text(html)
+
+    if rivalries:
+        rivalry_template = env.get_template("rivalries.html")
+        html = rivalry_template.render(
+            **common,
+            asset_prefix="",
+            managers=rivalries,
+            by_id={m.owner_id: m for m in rivalries},
+            highlights=rivalry_highlights(rivalries),
+        )
+        (output_dir / "rivalries.html").write_text(html)
 
     how_template = env.get_template("how_it_works.html")
     html = how_template.render(**common, **_how_it_works_context(season), asset_prefix="")

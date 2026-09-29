@@ -50,6 +50,15 @@
     <p class="award-teams">{% for side in pair %}{{ side.team.name }} {{ side.points | fmt2 }}{% if not loop.last %} &ndash; {% endif %}{% endfor %}</p>
     {% endfor %}
   </div>
+  {% if costliest_lineup %}
+  {% set cl = costliest_lineup.row %}
+  <div class="award-card award-bad">
+    <h3>Costliest lineup call</h3>
+    <p class="award-value">{{ cl.left_on_bench | fmt2 }}</p>
+    {% set start, sat = cl.swaps[0] %}
+    <p class="award-teams">{{ costliest_lineup.team.name }}: {% if sat %}started {{ sat.name }} ({{ sat.points | fmt2 }}) over {{ start.name }} ({{ start.points | fmt2 }}){% else %}left a slot empty with {{ start.name }} ({{ start.points | fmt2 }}) on the bench{% endif %}</p>
+  </div>
+  {% endif %}
 </section>
 
 <section class="chart-section">
@@ -133,6 +142,30 @@
   <p class="note">Position rankings appear once this week's games kick off.</p>
   {% endif %}
 </section>
+
+{% if lineup_rows %}
+<section>
+  <h2>Lineup efficiency</h2>
+  <p class="note">Each team's score against the best lineup it could have set from the same roster. <a href="{{ asset_prefix }}how-it-works.html#lineups">How this works</a></p>
+  <div class="table-scroll">
+  <table class="data-table explainer-table">
+    <thead><tr><th>Team</th><th>Scored</th><th>Best possible</th><th>Missed</th><th>Should have started</th></tr></thead>
+    <tbody>
+      {% for entry in lineup_rows %}
+      {% set r = entry.row %}
+      <tr>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
+        <td>{{ r.actual | fmt2 }}</td>
+        <td>{{ r.optimal | fmt2 }}</td>
+        <td>{% if r.left_on_bench > 0.005 %}<span class="down">{{ r.left_on_bench | fmt2 }}</span>{% else %}<span class="up">Perfect</span>{% endif %}</td>
+        <td>{% for start, sat in r.swaps %}{{ start.name }} ({{ start.points | fmt2 }}) {% if sat %}for {{ sat.name }} ({{ sat.points | fmt2 }}){% else %}in an empty slot{% endif %}{% if not loop.last %}; {% endif %}{% else %}&mdash;{% endfor %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
 
 <section>
   <h2>Roster moves</h2>

@@ -21,6 +21,7 @@ def _make_season(rosters, users, matchups_week5, transactions_week5, players, le
         league_average_match=bool(league["settings"]["league_average_match"]),
         weights=WEIGHTS,
         form_window=3,
+        roster_positions=league["roster_positions"],
     )
     board = build_season_board(weeks, teams)
     return SeasonSummary(
@@ -311,3 +312,116 @@ def test_how_it_works_page_exists_before_week_one(tmp_path, teams_only_season):
     html = (out / "how-it-works.html").read_text()
     assert "How the rankings work" in html
     assert "Worked example" not in html
+
+
+def test_lineup_efficiency_on_week_and_season_pages(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+
+    week = (out / "weeks" / "week-5.html").read_text()
+    section = week.split("<h2>Lineup efficiency</h2>")[1].split("</section>")[0]
+    assert section.count("team-cell") == len(rosters)
+    worst = max(season.weeks[-1].lineups, key=lambda r: r.left_on_bench)
+    assert "Costliest lineup call" in week
+    assert f"{worst.left_on_bench:.2f}" in week
+
+    board = (out / "season.html").read_text()
+    assert "<h2>Lineup efficiency</h2>" in board
+    assert "of 1</td>" in board  # perfect weeks out of weeks played
+
+
+def test_season_page_shows_playoff_odds(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import schedule_pairs, simulate_playoff_odds
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    remaining = {wk: schedule_pairs(matchups_week5) for wk in range(6, 15)}
+    season.playoff_odds = simulate_playoff_odds(season.weeks, remaining, False, 6, sims=300)
+    season.playoff_odds_sims, season.playoff_teams, season.playoff_byes = 300, 6, 2
+    season.remaining_weeks = len(remaining)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "season.html").read_text()
+    section = html.split('id="playoff-odds"')[1].split("</section>")[0]
+    assert "300 simulations of the remaining 9 regular-season weeks" in section
+    assert "top 2 get first-round byes" in section
+    assert section.count("team-cell") == len(rosters)
+
+
+def test_season_page_omits_playoff_odds_without_them(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    assert 'id="playoff-odds"' not in (out / "season.html").read_text()
+
+
+def test_pct_hedges_the_extremes():
+    from ffpr.build import _pct
+
+    assert [_pct(0), _pct(0.4567), _pct(1)] == ["<0.1%", "45.7%", ">99.9%"]
+
+
+def test_season_page_grades_pickups_and_trades(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import grade_acquisitions
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.acquisitions = grade_acquisitions({5: transactions_week5}, season.weeks, players)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "season.html").read_text()
+
+    best = season.acquisitions.pickups[0]
+    pickups = html.split('id="pickups"')[1].split("</section>")[0]
+    assert best.player.name in pickups and f"{best.player.points:.2f}" in pickups
+    assert pickups.count("<tr>") <= 11  # header + at most ten
+
+    trades = html.split('id="trades"')[1].split("</section>")[0]
+    assert "Week 5" in trades
+    for side in season.acquisitions.trades[0].sides:
+        assert season.teams[side.roster_id].name in trades
+
+
+def test_rivalries_page(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import build_rivalries
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    rivalries = build_rivalries([season])
+    out = tmp_path / "site"
+    render_site(season, out, rivalries=rivalries)
+
+    html = (out / "rivalries.html").read_text()
+    assert html.count('<details class="rivalry">') == len(rivalries)
+    assert "All-time standings" in html
+    assert 'href="rivalries.html"' in (out / "index.html").read_text()
+
+
+def test_no_rivalries_page_without_rivalries(tmp_path, teams_only_season):
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    assert not (out / "rivalries.html").exists()
+    assert "rivalries.html" not in (out / "index.html").read_text()
+
+
+def test_how_it_works_covers_the_new_features(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.playoff_teams, season.playoff_byes = 6, 2
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "how-it-works.html").read_text()
+    for anchor in ("playoff-odds", "lineups", "pickups", "rivalries"):
+        assert f'id="{anchor}"' in html
+    assert "10,000 times" in html
+    assert "top 6 make it, with the top 2 getting byes" in html
+    assert "league median" not in html.split('id="playoff-odds"')[1].split("</section>")[0]

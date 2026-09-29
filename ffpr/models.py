@@ -91,6 +91,25 @@ class PositionRankRow:
 
 
 @dataclass
+class LineupRow:
+    roster_id: int
+    actual: float  # starters' points as the manager set the lineup
+    optimal: float  # best legal lineup from the same players
+    should_have_started: list[PlayerScore]  # benched players in the best lineup, best first
+    should_have_sat: list[PlayerScore]  # starters it left out, worst first
+    # benched player -> starter he should have replaced (None: an empty slot), biggest gain first
+    swaps: list[tuple[PlayerScore, PlayerScore | None]] = field(default_factory=list)
+
+    @property
+    def left_on_bench(self) -> float:
+        return self.optimal - self.actual
+
+    @property
+    def efficiency(self) -> float:
+        return self.actual / self.optimal if self.optimal > 0 else 1.0
+
+
+@dataclass
 class WeekSummary:
     week: int
     matchups: list[Matchup]
@@ -99,6 +118,7 @@ class WeekSummary:
     power_rankings: list[PowerRankRow]  # sorted by rank ascending
     roster_moves: list[TeamRosterMoves]  # only teams with at least one move
     position_ranks: list[PositionRankRow]  # one row per roster, roster_id order
+    lineups: list[LineupRow] = field(default_factory=list)  # empty without roster slots
 
 
 @dataclass
@@ -143,11 +163,29 @@ class SeasonRecords:
 
 
 @dataclass
+class SeasonLineupRow:
+    roster_id: int
+    actual: float
+    optimal: float
+    weeks: int
+    perfect_weeks: int  # weeks where the lineup set was already the best possible
+
+    @property
+    def left_on_bench(self) -> float:
+        return self.optimal - self.actual
+
+    @property
+    def efficiency(self) -> float:
+        return self.actual / self.optimal if self.optimal > 0 else 1.0
+
+
+@dataclass
 class SeasonBoard:
     log: list[SeasonBoardEntry]
     crown_counts: dict[int, int]
     pf_leaderboard: list[PFLeaderboardRow]  # sorted by PF descending
     records: SeasonRecords
+    lineup_leaderboard: list[SeasonLineupRow] = field(default_factory=list)  # best efficiency first
 
 
 @dataclass
@@ -193,6 +231,131 @@ class DraftSummary:
 
 
 @dataclass
+class Acquisition:
+    week: int
+    roster_id: int  # the team that acquired the player
+    player: PlayerScore  # points = points this team started him for since he arrived
+    move_type: str  # "waiver", "free_agent" or "trade"
+    faab: int | None  # waiver bid, waiver adds only
+    starts: int  # weeks this team started him
+
+
+@dataclass
+class TradeSide:
+    roster_id: int
+    received: list[Acquisition]
+    picks: list[str]  # draft picks received, e.g. "2027 Rd 2"
+
+    @property
+    def points(self) -> float:
+        return sum(a.player.points for a in self.received)
+
+
+@dataclass
+class TradeGrade:
+    week: int
+    sides: list[TradeSide]  # most points since the trade first
+
+
+@dataclass
+class AcquisitionSummary:
+    pickups: list[Acquisition]  # waiver and free-agent adds, most starter points first
+    trades: list[TradeGrade]  # newest first
+
+
+@dataclass
+class Meeting:
+    season: str
+    week: int
+    points_for: float
+    points_against: float
+
+    @property
+    def result(self) -> str:
+        if self.points_for > self.points_against:
+            return "W"
+        return "L" if self.points_for < self.points_against else "T"
+
+
+@dataclass
+class HeadToHead:
+    opponent_id: str
+    meetings: list[Meeting]  # oldest first
+
+    @property
+    def wins(self) -> int:
+        return sum(m.result == "W" for m in self.meetings)
+
+    @property
+    def losses(self) -> int:
+        return sum(m.result == "L" for m in self.meetings)
+
+    @property
+    def ties(self) -> int:
+        return sum(m.result == "T" for m in self.meetings)
+
+    @property
+    def record(self) -> str:
+        base = f"{self.wins}-{self.losses}"
+        return f"{base}-{self.ties}" if self.ties else base
+
+    @property
+    def points_for(self) -> float:
+        return sum(m.points_for for m in self.meetings)
+
+    @property
+    def points_against(self) -> float:
+        return sum(m.points_against for m in self.meetings)
+
+    @property
+    def streak(self) -> tuple[str, int]:
+        """The current run of identical results, newest meeting backwards."""
+        last = self.meetings[-1].result
+        run = 0
+        for m in reversed(self.meetings):
+            if m.result != last:
+                break
+            run += 1
+        return last, run
+
+
+@dataclass
+class Manager:
+    owner_id: str
+    name: str  # their team name in the latest season they played
+    color: str
+    seasons: list[str]  # newest first
+    rivals: list[HeadToHead]  # most meetings first
+
+    @property
+    def wins(self) -> int:
+        return sum(h.wins for h in self.rivals)
+
+    @property
+    def losses(self) -> int:
+        return sum(h.losses for h in self.rivals)
+
+    @property
+    def ties(self) -> int:
+        return sum(h.ties for h in self.rivals)
+
+    @property
+    def win_pct(self) -> float:
+        games = self.wins + self.losses + self.ties
+        return (self.wins + 0.5 * self.ties) / games if games else 0.0
+
+
+@dataclass
+class PlayoffOddsRow:
+    roster_id: int
+    record: str  # current, median games included when the league plays them
+    projected_wins: float  # mean final regular-season wins across simulations
+    playoff_pct: float
+    bye_pct: float
+    top_seed_pct: float
+
+
+@dataclass
 class SeasonSummary:
     season: str
     league_name: str
@@ -210,3 +373,9 @@ class SeasonSummary:
     weights: dict[str, float] = field(default_factory=dict)
     form_window: int = 0
     league_average_match: bool = False
+    playoff_odds: list[PlayoffOddsRow] = field(default_factory=list)  # best odds first
+    playoff_odds_sims: int = 0
+    playoff_teams: int = 0
+    playoff_byes: int = 0
+    remaining_weeks: int = 0  # regular-season weeks the odds simulate
+    acquisitions: AcquisitionSummary | None = None

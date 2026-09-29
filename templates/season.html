@@ -4,6 +4,30 @@
 
 <h1 class="page-title">Season scoring board</h1>
 
+{% if season.playoff_odds %}
+<section id="playoff-odds">
+  <h2>Playoff odds</h2>
+  <p class="note">From {{ "{:,}".format(season.playoff_odds_sims) }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}. <a href="how-it-works.html#playoff-odds">How this works</a></p>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Team</th><th>Record</th><th>Proj. wins</th><th>Playoffs</th>{% if season.playoff_byes %}<th>Bye</th>{% endif %}<th>#1 seed</th></tr></thead>
+    <tbody>
+      {% for r in season.playoff_odds %}
+      <tr>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[r.roster_id].color }}"></span>{{ teams[r.roster_id].name }}</td>
+        <td>{{ r.record }}</td>
+        <td>{{ "%.1f" | format(r.projected_wins) }}</td>
+        <td><strong>{{ r.playoff_pct | pct }}</strong></td>
+        {% if season.playoff_byes %}<td>{{ r.bye_pct | pct }}</td>{% endif %}
+        <td>{{ r.top_seed_pct | pct }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 <section>
   <h2>Weekly log</h2>
   <div class="table-scroll">
@@ -100,6 +124,78 @@
   <h2>Points for vs. points against</h2>
   <div class="chart-container chart-tall"><canvas id="chart-pf-pa"></canvas></div>
 </section>
+
+{% if board.lineup_leaderboard %}
+<section>
+  <h2>Lineup efficiency</h2>
+  <p class="note">How close each manager's lineups came to the best possible lineup from their own roster, all season. <a href="how-it-works.html#lineups">How this works</a></p>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>#</th><th>Team</th><th>Efficiency</th><th>Missed points</th><th>Perfect weeks</th></tr></thead>
+    <tbody>
+      {% for r in board.lineup_leaderboard %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[r.roster_id].color }}"></span>{{ teams[r.roster_id].name }}</td>
+        <td>{{ "%.1f" | format(r.efficiency * 100) }}%</td>
+        <td>{{ r.left_on_bench | fmt2 }}</td>
+        <td>{{ r.perfect_weeks }} of {{ r.weeks }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+{% set acq = season.acquisitions %}
+{% if acq and acq.pickups and acq.pickups[0].player.points > 0 %}
+<section id="pickups">
+  <h2>Best pickups</h2>
+  <p class="note">Waiver and free-agent adds ranked by points scored in the new team's starting lineup since the move. <a href="how-it-works.html#pickups">How this works</a></p>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Player</th><th>Team</th><th>Added</th><th>Starts</th><th>Points</th></tr></thead>
+    <tbody>
+      {% for a in acq.pickups if a.player.points > 0 %}{% if loop.index <= 10 %}
+      <tr>
+        <td>{{ a.player.name }} <span class="note-inline">{{ a.player.position }}</span></td>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[a.roster_id].color }}"></span>{{ teams[a.roster_id].name }}</td>
+        <td>Wk {{ a.week }} &middot; {% if a.move_type == "waiver" %}waiver{% if a.faab %} (${{ a.faab }}){% endif %}{% else %}free agent{% endif %}</td>
+        <td>{{ a.starts }}</td>
+        <td><strong>{{ a.player.points | fmt2 }}</strong></td>
+      </tr>
+      {% endif %}{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+{% if acq and acq.trades %}
+<section id="trades">
+  <h2>Trades</h2>
+  <p class="note">Each side's haul, measured by points the players it received have scored in its starting lineup since the trade. Draft picks are listed but not scored. <a href="how-it-works.html#pickups">How this works</a></p>
+  {% for trade in acq.trades %}
+  {% set lead = trade.sides[0].points - (trade.sides[1].points if trade.sides | length > 1 else 0) %}
+  <h3>Week {{ trade.week }}{% if lead > 0.005 %} &middot; <span class="up">{{ teams[trade.sides[0].roster_id].name }} +{{ lead | fmt2 }}</span>{% else %} &middot; even so far{% endif %}</h3>
+  <div class="table-scroll">
+  <table class="data-table explainer-table">
+    <thead><tr><th>Team</th><th>Received</th><th>Points since</th></tr></thead>
+    <tbody>
+      {% for side in trade.sides %}
+      <tr>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[side.roster_id].color }}"></span>{{ teams[side.roster_id].name }}</td>
+        <td>{% for a in side.received %}{{ a.player.name }} ({% if a.starts %}{{ a.player.points | fmt2 }} in {{ a.starts }} start{{ "s" if a.starts != 1 }}{% else %}no starts yet{% endif %}){% if not loop.last or side.picks %}, {% endif %}{% endfor %}{% for pk in side.picks %}{{ pk }} pick{% if not loop.last %}, {% endif %}{% endfor %}{% if not side.received and not side.picks %}&mdash;{% endif %}</td>
+        <td>{% if loop.first and lead > 0.005 %}<strong class="up">{{ side.points | fmt2 }}</strong>{% else %}{{ side.points | fmt2 }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
 
 <section class="chart-section">
   <h2>Points left on bench</h2>
