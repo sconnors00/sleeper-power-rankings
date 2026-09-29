@@ -524,3 +524,78 @@ def test_lineup_swaps_flag_an_empty_slot():
         ("a", "c"),
         ("b", None),
     ]
+
+
+def test_playoff_byes_fill_to_a_power_of_two():
+    from ffpr.compute import playoff_byes
+
+    assert [playoff_byes(n) for n in (4, 6, 7, 8)] == [0, 2, 1, 0]
+
+
+def test_seed_playoffs_by_wins_then_points_for():
+    from ffpr.compute import seed_playoffs
+
+    wins = {1: 5, 2: 5, 3: 4, 4: 6}
+    pf = {1: 400, 2: 500, 3: 900, 4: 300}
+    assert seed_playoffs(wins, pf, 3) == [4, 2, 1]
+
+
+def test_seed_playoffs_division_winners_first():
+    """2024: roster 6 won its division and took a bye over wild card roster 8."""
+    from ffpr.compute import seed_playoffs
+
+    wins = {9: 9, 8: 9, 6: 9, 7: 9, 11: 9, 10: 7}
+    pf = {9: 2186.71, 8: 2168.44, 6: 2152.15, 7: 2126.81, 11: 2026.03, 10: 2169.95}
+    divisions = {9: 3, 8: 3, 6: 2, 7: 3, 11: 1, 10: 2}
+    assert seed_playoffs(wins, pf, 6, divisions) == [9, 6, 11, 8, 7, 10]
+
+
+def _odds_inputs(rosters, matchups_week5, players):
+    from ffpr.compute import build_week_summaries, schedule_pairs
+
+    weeks = build_week_summaries(
+        [r["roster_id"] for r in rosters],
+        {5: matchups_week5},
+        {},
+        {r["roster_id"]: r for r in rosters},
+        players,
+        league_average_match=False,
+        weights=WEIGHTS,
+        form_window=3,
+    )
+    pairs = schedule_pairs(matchups_week5)
+    return weeks, {wk: pairs for wk in range(6, 15)}
+
+
+def test_playoff_odds_are_consistent(rosters, matchups_week5, players):
+    from ffpr.compute import simulate_playoff_odds
+
+    weeks, remaining = _odds_inputs(rosters, matchups_week5, players)
+    rows = simulate_playoff_odds(weeks, remaining, False, 6, sims=400, seed=1)
+    assert len(rows) == len(rosters)
+    assert abs(sum(r.playoff_pct for r in rows) - 6) < 1e-9
+    assert abs(sum(r.bye_pct for r in rows) - 2) < 1e-9
+    assert abs(sum(r.top_seed_pct for r in rows) - 1) < 1e-9
+    assert rows == simulate_playoff_odds(weeks, remaining, False, 6, sims=400, seed=1)
+    # 1 win so far + 9 games, one win per game across the league
+    assert abs(sum(r.projected_wins for r in rows) - 6 * 10) < 1e-6
+
+
+def test_playoff_odds_count_the_median_game(rosters, matchups_week5, players):
+    from ffpr.compute import simulate_playoff_odds
+
+    weeks, remaining = _odds_inputs(rosters, matchups_week5, players)
+    rows = simulate_playoff_odds(weeks, remaining, True, 6, sims=200, seed=1)
+    # every week is now worth 12 wins: 6 head-to-head + 6 against the median
+    assert abs(sum(r.projected_wins for r in rows) - 12 * 10) < 1e-6
+    assert all("-" in r.record for r in rows)
+
+
+def test_playoff_odds_lock_in_a_clinched_team(rosters, matchups_week5, players):
+    from ffpr.compute import simulate_playoff_odds
+
+    weeks, remaining = _odds_inputs(rosters, matchups_week5, players)
+    leader = max(weeks[0].matchups, key=lambda m: m.team_points).roster_id
+    last = {14: remaining[14]}
+    rows = {r.roster_id: r for r in simulate_playoff_odds(weeks * 12, last, False, 6, sims=200)}
+    assert rows[leader].playoff_pct == 1.0

@@ -331,3 +331,37 @@ def test_lineup_efficiency_on_week_and_season_pages(
     board = (out / "season.html").read_text()
     assert "<h2>Lineup efficiency</h2>" in board
     assert "of 1</td>" in board  # perfect weeks out of weeks played
+
+
+def test_season_page_shows_playoff_odds(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import schedule_pairs, simulate_playoff_odds
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    remaining = {wk: schedule_pairs(matchups_week5) for wk in range(6, 15)}
+    season.playoff_odds = simulate_playoff_odds(season.weeks, remaining, False, 6, sims=300)
+    season.playoff_odds_sims, season.playoff_teams, season.playoff_byes = 300, 6, 2
+    season.remaining_weeks = len(remaining)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "season.html").read_text()
+    section = html.split('id="playoff-odds"')[1].split("</section>")[0]
+    assert "300 simulations of the remaining 9 regular-season weeks" in section
+    assert "top 2 get first-round byes" in section
+    assert section.count("team-cell") == len(rosters)
+
+
+def test_season_page_omits_playoff_odds_without_them(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    assert 'id="playoff-odds"' not in (out / "season.html").read_text()
+
+
+def test_pct_hedges_the_extremes():
+    from ffpr.build import _pct
+
+    assert [_pct(0), _pct(0.4567), _pct(1)] == ["<0.1%", "45.7%", ">99.9%"]

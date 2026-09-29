@@ -6,6 +6,9 @@ unit tested against committed fixtures.
 
 from __future__ import annotations
 
+import random
+import statistics
+
 from ffpr.models import (
     DraftPickGrade,
     DraftSummary,
@@ -15,6 +18,7 @@ from ffpr.models import (
     PFLeaderboardRow,
     PlayerMove,
     PlayerScore,
+    PlayoffOddsRow,
     PositionRankRow,
     PowerRankRow,
     PreseasonRow,
@@ -1068,3 +1072,163 @@ def build_lineup_leaderboard(weeks: list[WeekSummary]) -> list[SeasonLineupRow]:
             agg.weeks += 1
             agg.perfect_weeks += row.left_on_bench <= 0.005
     return sorted(by_roster.values(), key=lambda r: (-r.efficiency, r.roster_id))
+
+
+# --- Playoff odds ---
+
+
+def schedule_pairs(raw_matchups: list[dict]) -> list[tuple[int, int]]:
+    """(roster, roster) pairings for a scheduled week; unpaired entries skipped."""
+    by_matchup: dict[int, list[int]] = {}
+    for m in raw_matchups:
+        if m.get("matchup_id") is not None:
+            by_matchup.setdefault(m["matchup_id"], []).append(m["roster_id"])
+    return [(a, b) for a, b in (ids for ids in by_matchup.values() if len(ids) == 2)]
+
+
+def playoff_byes(playoff_teams: int) -> int:
+    """First-round byes in a single-elimination bracket: the gap to a power of two."""
+    size = 1
+    while size < playoff_teams:
+        size *= 2
+    return size - playoff_teams
+
+
+def seed_playoffs(
+    wins: dict[int, float],
+    points_for: dict[int, float],
+    playoff_teams: int,
+    divisions: dict[int, int] | None = None,
+) -> list[int]:
+    """Playoff roster ids in seed order.
+
+    Standings go by wins, then points for, as Sleeper does. With divisions on,
+    every division winner is seeded ahead of every wild card -- how this
+    league's 2022-2024 brackets were actually drawn.
+    """
+    order = sorted(wins, key=lambda r: (-wins[r], -points_for[r], r))
+    if not divisions:
+        return order[:playoff_teams]
+    winners: list[int] = []
+    won: set[int] = set()
+    for rid in order:
+        division = divisions.get(rid)
+        if division is not None and division not in won:
+            won.add(division)
+            winners.append(rid)
+    return (winners + [r for r in order if r not in winners])[:playoff_teams]
+
+
+def simulate_playoff_odds(
+    weeks: list[WeekSummary],
+    remaining: dict[int, list[tuple[int, int]]],
+    league_average_match: bool,
+    playoff_teams: int,
+    divisions: dict[int, int] | None = None,
+    sims: int = 10_000,
+    seed: int = 0,
+) -> list[PlayoffOddsRow]:
+    """Monte Carlo the rest of the regular season from each team's scoring.
+
+    A team's scores are its true strength plus weekly noise. The noise is
+    measured from how much teams' own scores swing week to week; whatever
+    spread between team averages is left over is real strength. Each team's
+    strength estimate is its average pulled toward the league average by the
+    share of its gap that noise alone would explain -- a lot after three
+    weeks, little by November -- and every simulated season redraws each
+    team's strength from that estimate's uncertainty before playing it out.
+    """
+    history: dict[int, list[float]] = {}
+    wins: dict[int, float] = {}
+    games: dict[int, int] = {}
+    points_for: dict[int, float] = {}
+    for wk in weeks:
+        for rid, (w, g) in compute_weekly_head_to_head(wk.matchups, league_average_match).items():
+            wins[rid] = wins.get(rid, 0.0) + w
+            games[rid] = games.get(rid, 0) + g
+        for m in wk.matchups:
+            history.setdefault(m.roster_id, []).append(m.team_points)
+            points_for[m.roster_id] = points_for.get(m.roster_id, 0.0) + m.team_points
+    if not history or not remaining:
+        return []
+
+    all_scores = [s for scores in history.values() for s in scores]
+    league_mean = statistics.fmean(all_scores)
+    team_means = {rid: statistics.fmean(scores) for rid, scores in history.items()}
+    dof = len(all_scores) - len(history)
+    if dof > 0:
+        noise_var = sum((s - team_means[rid]) ** 2 for rid, sc in history.items() for s in sc) / dof
+    else:  # one week in: nothing yet separates luck from strength
+        noise_var = statistics.pvariance(all_scores)
+    noise_var = max(noise_var, 1.0)
+    per_team = len(all_scores) / len(history)
+    talent_var = max(0.0, statistics.pvariance(team_means.values()) - noise_var / per_team)
+
+    strength: dict[int, tuple[float, float]] = {}  # rid -> (estimate, its std error)
+    for rid, scores in history.items():
+        sampling_var = noise_var / len(scores)
+        weight = talent_var / (talent_var + sampling_var) if talent_var > 0 else 0.0
+        estimate = league_mean + weight * (team_means[rid] - league_mean)
+        strength[rid] = (estimate, (weight * sampling_var) ** 0.5)
+    noise_sd = noise_var**0.5
+
+    rosters = sorted(history)
+    for rid in rosters:
+        wins.setdefault(rid, 0.0)
+        games.setdefault(rid, 0)
+    byes = playoff_byes(playoff_teams)
+    made = dict.fromkeys(rosters, 0)
+    bye = dict.fromkeys(rosters, 0)
+    top = dict.fromkeys(rosters, 0)
+    total_wins = dict.fromkeys(rosters, 0.0)
+    rng = random.Random(seed)
+
+    for _ in range(sims):
+        w = dict(wins)
+        pf = dict(points_for)
+        true_strength = {rid: rng.gauss(*strength[rid]) for rid in rosters}
+        for week in sorted(remaining):
+            scores = {rid: rng.gauss(true_strength[rid], noise_sd) for rid in rosters}
+            for a, b in remaining[week]:
+                if a not in scores or b not in scores:
+                    continue
+                if scores[a] > scores[b]:
+                    w[a] += 1
+                elif scores[b] > scores[a]:
+                    w[b] += 1
+                else:
+                    w[a] += 0.5
+                    w[b] += 0.5
+            if league_average_match:
+                median = _median(list(scores.values()))
+                for rid, s in scores.items():
+                    w[rid] += 1.0 if s > median else 0.5 if s == median else 0.0
+            for rid, s in scores.items():
+                pf[rid] += s
+        seeds = seed_playoffs(w, pf, playoff_teams, divisions)
+        for i, rid in enumerate(seeds):
+            made[rid] += 1
+            bye[rid] += i < byes
+            top[rid] += i == 0
+        for rid in rosters:
+            total_wins[rid] += w[rid]
+
+    rows = []
+    for rid in rosters:
+        losses = games[rid] - wins[rid]
+        record = (
+            f"{wins[rid]:.1f}-{losses:.1f}"
+            if wins[rid] % 1 or losses % 1
+            else f"{int(wins[rid])}-{int(losses)}"
+        )
+        rows.append(
+            PlayoffOddsRow(
+                roster_id=rid,
+                record=record,
+                projected_wins=total_wins[rid] / sims,
+                playoff_pct=made[rid] / sims,
+                bye_pct=bye[rid] / sims,
+                top_seed_pct=top[rid] / sims,
+            )
+        )
+    return sorted(rows, key=lambda r: (-r.playoff_pct, -r.projected_wins, r.roster_id))

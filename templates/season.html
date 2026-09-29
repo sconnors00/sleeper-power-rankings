@@ -4,6 +4,30 @@
 
 <h1 class="page-title">Season scoring board</h1>
 
+{% if season.playoff_odds %}
+<section id="playoff-odds">
+  <h2>Playoff odds</h2>
+  <p class="note">From {{ "{:,}".format(season.playoff_odds_sims) }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}. <a href="how-it-works.html#playoff-odds">How this works</a></p>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>Team</th><th>Record</th><th>Proj. wins</th><th>Playoffs</th>{% if season.playoff_byes %}<th>Bye</th>{% endif %}<th>#1 seed</th></tr></thead>
+    <tbody>
+      {% for r in season.playoff_odds %}
+      <tr>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[r.roster_id].color }}"></span>{{ teams[r.roster_id].name }}</td>
+        <td>{{ r.record }}</td>
+        <td>{{ "%.1f" | format(r.projected_wins) }}</td>
+        <td><strong>{{ r.playoff_pct | pct }}</strong></td>
+        {% if season.playoff_byes %}<td>{{ r.bye_pct | pct }}</td>{% endif %}
+        <td>{{ r.top_seed_pct | pct }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 <section>
   <h2>Weekly log</h2>
   <div class="table-scroll">

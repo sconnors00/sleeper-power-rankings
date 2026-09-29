@@ -241,6 +241,16 @@ class DraftSummary:
 
 
 @dataclass
+class PlayoffOddsRow:
+    roster_id: int
+    record: str  # current, median games included when the league plays them
+    projected_wins: float  # mean final regular-season wins across simulations
+    playoff_pct: float
+    bye_pct: float
+    top_seed_pct: float
+
+
+@dataclass
 class SeasonSummary:
     season: str
     league_name: str
@@ -258,3 +268,8 @@ class SeasonSummary:
     weights: dict[str, float] = field(default_factory=dict)
     form_window: int = 0
     league_average_match: bool = False
+    playoff_odds: list[PlayoffOddsRow] = field(default_factory=list)  # best odds first
+    playoff_odds_sims: int = 0
+    playoff_teams: int = 0
+    playoff_byes: int = 0
+    remaining_weeks: int = 0  # regular-season weeks the odds simulate

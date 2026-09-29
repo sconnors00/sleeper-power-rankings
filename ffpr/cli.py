@@ -23,6 +23,9 @@ from ffpr.compute import (
     build_teams,
     build_week_summaries,
     grade_draft,
+    playoff_byes,
+    schedule_pairs,
+    simulate_playoff_odds,
 )
 from ffpr.models import PreseasonRow, SeasonSummary
 from ffpr.sleeper import SleeperClient, SleeperError
@@ -148,6 +151,52 @@ def _build_preseason(
     )
 
 
+PLAYOFF_SIMS = 10_000
+
+
+def _playoff_odds(
+    client: SleeperClient,
+    league_obj: dict,
+    season: str,
+    rosters: list[dict],
+    week_summaries: list,
+    through_week: int,
+) -> tuple[list, dict[int, list[tuple[int, int]]]]:
+    """Odds and the remaining schedule they simulate, or nothing.
+
+    Best-effort: a failed schedule fetch just means no odds this build.
+    """
+    settings = league_obj["settings"]
+    playoff_teams = settings.get("playoff_teams") or 0
+    if not week_summaries or not playoff_teams:
+        return [], {}
+    try:
+        remaining = {
+            wk: pairs
+            for wk in range(through_week + 1, settings["playoff_week_start"])
+            if (
+                pairs := schedule_pairs(
+                    client.get_matchups(league_obj["league_id"], season, wk, completed=False)
+                )
+            )
+        }
+    except (SleeperError, httpx.HTTPError):
+        return [], {}
+    divisions = None
+    if settings.get("divisions"):
+        divisions = {r["roster_id"]: (r.get("settings") or {}).get("division") for r in rosters}
+    odds = simulate_playoff_odds(
+        week_summaries,
+        remaining,
+        bool(settings.get("league_average_match", 0)),
+        playoff_teams,
+        divisions,
+        sims=PLAYOFF_SIMS,
+        seed=int(season) if season.isdigit() else 0,
+    )
+    return odds, remaining
+
+
 def _walk_previous_league_ids(client: SleeperClient, league_obj: dict) -> list[str]:
     """Every earlier league_id in the renewal chain, most recent first.
 
@@ -245,6 +294,12 @@ def _build_season_summary(
                 )
                 provisional_week_num = candidate
 
+    playoff_odds, remaining = ([], {})
+    if is_current_season:
+        playoff_odds, remaining = _playoff_odds(
+            client, league_obj, season, rosters, week_summaries, through_week
+        )
+
     draft_data = _fetch_draft(client, league_obj)
     draft_summary = None
     if draft_data is not None:
@@ -271,6 +326,11 @@ def _build_season_summary(
         weights=weights,
         form_window=form_window,
         league_average_match=league_average_match,
+        playoff_odds=playoff_odds,
+        playoff_odds_sims=PLAYOFF_SIMS if playoff_odds else 0,
+        playoff_teams=league_obj["settings"].get("playoff_teams") or 0,
+        playoff_byes=playoff_byes(league_obj["settings"].get("playoff_teams") or 0),
+        remaining_weeks=len(remaining),
     )
 
 

@@ -24,6 +24,16 @@ def _fmt2(value: float) -> str:
     return f"{value:.2f}"
 
 
+def _pct(share: float) -> str:
+    """A simulated probability. The extremes are hedged: 0 of 10,000 runs is
+    unlikely, not impossible, since clinching isn't worked out exactly."""
+    if share <= 0:
+        return "<0.1%"
+    if share >= 1:
+        return ">99.9%"
+    return f"{share:.1%}"
+
+
 def _build_jinja_env() -> Environment:
     env = Environment(
         loader=FileSystemLoader(str(TEMPLATES_DIR)),
@@ -32,6 +42,7 @@ def _build_jinja_env() -> Environment:
         lstrip_blocks=True,
     )
     env.filters["fmt2"] = _fmt2
+    env.filters["pct"] = _pct
     return env
 
 
