@@ -14,6 +14,8 @@ import typer
 
 from ffpr.build import render_site
 from ffpr.compute import (
+    DEFAULT_FORM_WINDOW,
+    DEFAULT_WEIGHTS,
     apply_official_records,
     build_preseason_rankings,
     build_provisional_week_summary,
@@ -27,8 +29,6 @@ from ffpr.sleeper import SleeperClient, SleeperError
 
 app = typer.Typer(help="Sleeper fantasy football power rankings static site generator.")
 
-DEFAULT_WEIGHTS = {"win_pct": 0.30, "allplay_pct": 0.25, "pf_norm": 0.30, "form_norm": 0.15}
-DEFAULT_FORM_WINDOW = 3
 CONFIG_PATH = Path("config.toml")
 DATA_DIR = Path("data")
 SITE_DIR = Path("site")
@@ -267,6 +267,9 @@ def _build_season_summary(
         provisional_week_summary=provisional_week_summary,
         preseason=preseason,
         draft=draft_summary,
+        weights=weights,
+        form_window=form_window,
+        league_average_match=league_average_match,
     )
 
 

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}How it works &middot; {{ league_name }}{% endblock %}
+{% block content %}
+
+<h1 class="page-title">How the rankings work</h1>
+
+<p class="lede">Power rankings try to answer &ldquo;who is actually the best team right now?&rdquo; A record alone can't do that, because a good team can go 1&ndash;2 by drawing the week's top scorers. So each team gets a score that blends four signals, and the highest score is #1.</p>
+
+<section id="power">
+  <h2>Power rankings</h2>
+  <div class="formula">score = {% for w in weights %}{{ "%.2f" | format(w.weight) }} &times; {{ w.label }}{% if not loop.last %} + {% endif %}{% endfor %}</div>
+
+  <div class="table-scroll">
+  <table class="data-table explainer-table stack-narrow">
+    <thead><tr><th>Signal</th><th>Weight</th><th>What it measures</th></tr></thead>
+    <tbody>
+      {% for w in weights %}
+      <tr>
+        <td><strong>{{ w.label }}</strong></td>
+        <td>{{ "%.0f" | format(w.weight * 100) }}%</td>
+        <td>
+          {% if w.key == "win_pct" %}
+          Your head-to-head win percentage.{% if league_average_match %} Each week counts as two games: your matchup, plus a game against the league's median score that week.{% endif %} Ties count as half a win.
+          {% elif w.key == "allplay_pct" %}
+          Your record if you had played every other team every week. Each week you &ldquo;play&rdquo; all {{ num_teams - 1 }} other teams and beat everyone you outscored. This takes schedule luck out of the picture.
+          {% elif w.key == "pf_norm" %}
+          Your total points for the season, scaled so the league's lowest total is 0 and the highest is 1.
+          {% elif w.key == "form_norm" %}
+          Your average score over your last {{ form_window }} weeks, scaled the same way (0 = coldest team, 1 = hottest). This is what lets a surging team climb.
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <p>Every signal runs from 0 to 1, so the score does too. If two teams finish on exactly the same score, the one with more total points ranks higher.</p>
+
+  {% if example %}
+  <h3>Worked example: Week {{ example.week }}'s #1</h3>
+  <p><span class="team-swatch" style="background:{{ example.team.color }}"></span> <strong>{{ example.team.name }}</strong></p>
+  <div class="table-scroll">
+  <table class="data-table explainer-table">
+    <thead><tr><th>Signal</th><th>Value</th><th>&times; Weight</th><th>Adds</th></tr></thead>
+    <tbody>
+      {% for t in example.terms %}
+      <tr>
+        <td>{{ t.label }}</td>
+        <td>{{ "%.3f" | format(t.value) }}</td>
+        <td>{{ "%.2f" | format(t.weight) }}</td>
+        <td>{{ "%.3f" | format(t.value * t.weight) }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="total-row"><td colspan="3">Score</td><td>{{ "%.3f" | format(example.score) }}</td></tr>
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+
+<section id="columns">
+  <h2>Reading the rankings table</h2>
+  <dl class="glossary">
+    <dt>Record</dt>
+    <dd>Wins and losses through that week. On the latest week it's the official record from Sleeper.</dd>
+    <dt>All-play</dt>
+    <dd>The all-play record described above: wins and losses against every team, every week.</dd>
+    <dt>Pts</dt>
+    <dd>What the team scored that week.</dd>
+    <dt>Luck</dt>
+    <dd>Win % minus all-play %. Positive means the team is winning more often than its scoring deserves (a friendly schedule); negative means it keeps running into hot opponents.</dd>
+    <dt>Score</dt>
+    <dd>The blended power score, 0 to 1.</dd>
+    <dt>&Delta;</dt>
+    <dd>Places moved since the previous week. <span class="up">&#9650;</span> is up, <span class="down">&#9660;</span> is down.</dd>
+  </dl>
+</section>
+
+<section id="timing">
+  <h2>When a week counts</h2>
+  <p>A week is ranked once its games are done and every team has points on the board. While a week is still being played, its page shows live scores and awards marked <span class="badge badge-provisional">in progress</span>, and the rankings table keeps showing the previous week's order until the week finishes.</p>
+  <p>The site rebuilds itself every Tuesday morning after Monday Night Football, with a second run Tuesday afternoon as a backstop. Every rebuild re-checks the whole season's scores and roster moves, so late stat corrections and waiver claims are picked up.</p>
+</section>
+
+<section id="preseason">
+  <h2>Pre-season rankings</h2>
+  <p>Before Week 1 there's nothing to rank on, so the Preseason page carries over last season's final power rankings, matched to each roster. A team that changed owners is marked <em>new owner</em>, the reigning champion gets a trophy, and any roster with no history from last season starts at the bottom.</p>
+</section>
+
+<section id="positions">
+  <h2>Position rankings</h2>
+  <p>Each week page also ranks every team at {% for p in positions %}{{ p }}{% if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %}: the starters' points at that position, ranked 1&ndash;{{ num_teams }} across the league. Bench points don't count. Starters count at their real position whatever slot they filled, so a FLEX receiver counts as WR and a team starting two QBs in the superflex gets both in its QB total. Teams on the same total share a rank. The week's best at each position is shown in green and the worst in red.</p>
+</section>
+
+{% if has_draft %}
+<section id="draft">
+  <h2>Draft grades</h2>
+  <p>Each auction pick is graded by value against price. A player's value is what <em>this league</em> paid for players ranked around them in Sleeper's player rankings, so it reflects our own market rather than a national one. Paying less than that value is a steal; paying more is an overpay.</p>
+  <p>A team's grade comes from its total surplus (value minus dollars spent) compared with the rest of the league: well above average earns an A, around average a B, well below a C or D. Keepers are listed but not graded, since their prices come from keeper rules rather than bidding.</p>
+</section>
+{% endif %}
+
+{% endblock %}

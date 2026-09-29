@@ -206,3 +206,7 @@ class SeasonSummary:
     provisional_week_summary: WeekSummary | None = None
     preseason: list[PreseasonRow] = field(default_factory=list)
     draft: DraftSummary | None = None
+    # How the power rankings were computed, for the how-it-works page.
+    weights: dict[str, float] = field(default_factory=dict)
+    form_window: int = 0
+    league_average_match: bool = False

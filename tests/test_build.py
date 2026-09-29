@@ -257,3 +257,57 @@ def test_position_rankings_hidden_before_kickoff(
     render_site(season, out)
     html = (out / "weeks" / "week-6.html").read_text()
     assert "Position rankings appear once this week" in html
+
+
+def test_how_it_works_page_explains_the_real_ranking(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.weights = WEIGHTS
+    season.form_window = 3
+    out = tmp_path / "site"
+    render_site(season, out)
+
+    html = (out / "how-it-works.html").read_text()
+    top = season.weeks[-1].power_rankings[0]
+    assert season.teams[top.roster_id].name in html
+    assert f"{top.score:.3f}" in html
+    assert "30%" in html and "25%" in html and "15%" in html
+    assert "last 3 weeks" in html
+    assert "all 11 other teams" in html
+    assert "median" not in html  # this league plays no median game
+
+    assert 'href="how-it-works.html"' in (out / "index.html").read_text()
+    assert 'href="../how-it-works.html#power"' in (out / "weeks" / "week-5.html").read_text()
+
+
+def test_how_it_works_worked_example_adds_up(
+    rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.build import _how_it_works_context
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    example = _how_it_works_context(season)["example"]
+    total = sum(t["value"] * t["weight"] for t in example["terms"])
+    assert abs(total - example["score"]) < 1e-9
+
+
+def test_how_it_works_reflects_configured_weights_and_median_game(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.weights = {"win_pct": 0.40, "allplay_pct": 0.20, "pf_norm": 0.20, "form_norm": 0.20}
+    season.league_average_match = True
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "how-it-works.html").read_text()
+    assert "40%" in html
+    assert "median score" in html
+
+
+def test_how_it_works_page_exists_before_week_one(tmp_path, teams_only_season):
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    html = (out / "how-it-works.html").read_text()
+    assert "How the rankings work" in html
+    assert "Worked example" not in html
