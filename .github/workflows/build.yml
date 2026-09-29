@@ -42,6 +42,9 @@ jobs:
           restore-keys: |
             sleeper-data-
       - run: uv sync
+      - run: uv run python diag_playoffs.py
+        env:
+          SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
       - run: uv run ffpr build --provisional
         env:
           SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
