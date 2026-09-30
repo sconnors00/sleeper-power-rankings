@@ -175,25 +175,7 @@
 {% if acq and acq.trades %}
 <section id="trades">
   <h2>Trades</h2>
-  <p class="note">Each side's haul, measured by points the players it received have scored in its starting lineup since the trade. Draft picks are listed but not scored. <a href="how-it-works.html#pickups">How this works</a></p>
-  {% for trade in acq.trades %}
-  {% set lead = trade.sides[0].points - (trade.sides[1].points if trade.sides | length > 1 else 0) %}
-  <h3>Week {{ trade.week }}{% if lead > 0.005 %} &middot; <span class="up">{{ teams[trade.sides[0].roster_id].name }} +{{ lead | fmt2 }}</span>{% else %} &middot; even so far{% endif %}</h3>
-  <div class="table-scroll">
-  <table class="data-table explainer-table">
-    <thead><tr><th>Team</th><th>Received</th><th>Points since</th></tr></thead>
-    <tbody>
-      {% for side in trade.sides %}
-      <tr>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[side.roster_id].color }}"></span>{{ teams[side.roster_id].name }}</td>
-        <td>{% for a in side.received %}{{ a.player.name }} ({% if a.starts %}{{ a.player.points | fmt2 }} in {{ a.starts }} start{{ "s" if a.starts != 1 }}{% else %}no starts yet{% endif %}){% if not loop.last or side.picks %}, {% endif %}{% endfor %}{% for pk in side.picks %}{{ pk }} pick{% if not loop.last %}, {% endif %}{% endfor %}{% if not side.received and not side.picks %}&mdash;{% endif %}</td>
-        <td>{% if loop.first and lead > 0.005 %}<strong class="up">{{ side.points | fmt2 }}</strong>{% else %}{{ side.points | fmt2 }}{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
-  {% endfor %}
+  <p class="note">{{ acq.trades | length }} trade{{ "s" if acq.trades | length != 1 }} this season, each graded on the <a href="trades.html#history">Trades page</a>{% if season.trade_values %} next to the trade calculator{% endif %}.</p>
 </section>
 {% endif %}
 

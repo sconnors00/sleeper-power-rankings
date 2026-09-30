@@ -23,6 +23,7 @@ from ffpr.compute import (
     build_rivalries,
     build_season_board,
     build_teams,
+    build_trade_values,
     build_week_summaries,
     grade_acquisitions,
     grade_draft,
@@ -310,6 +311,19 @@ def _build_season_summary(
     # after the season starts, not just while there are no completed weeks.
     preseason = _build_preseason(client, league_obj, rosters, players, weights, form_window)
 
+    # Trade values look forward, so only the season still being played gets them.
+    trade_values = None
+    if is_current_season and week_summaries:
+        deadline = league_obj["settings"].get("trade_deadline") or 0
+        trade_values = build_trade_values(
+            weeks_raw,
+            rosters,
+            players,
+            league_obj["roster_positions"],
+            weeks_left=max(0, playoff_week_start - 1 - through_week),
+            trade_deadline=deadline if 0 < deadline < playoff_week_start else None,
+        )
+
     return SeasonSummary(
         season=season,
         league_name=league_obj["name"],
@@ -332,6 +346,7 @@ def _build_season_summary(
         playoff_byes=playoff_byes(league_obj["settings"].get("playoff_teams") or 0),
         remaining_weeks=len(remaining),
         acquisitions=grade_acquisitions(transactions_raw, week_summaries, players),
+        trade_values=trade_values,
     )
 
 

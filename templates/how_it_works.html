@@ -112,6 +112,43 @@
   <p>Trades compare each side's total. Draft picks that changed hands are listed but can't be scored until they're used.</p>
 </section>
 
+{% if trade_values %}
+<section id="trade-values">
+  <h2>Trade calculator</h2>
+  <p>The Trades page gives every rostered player a <strong>value</strong>: how many more points per week he should score from here on than a replacement-level starter at his position.</p>
+
+  <h3>Projection</h3>
+  <p>A player's projection blends what he has actually scored this season, in this league's scoring, with what players ranked like him in Sleeper's player rankings score at his position. That expectation comes from this league's own results: a line fitted through every player's points per game against his Sleeper rank, one position at a time. It counts as {{ prior_games }} games of evidence:</p>
+  <div class="formula">projection = (games &times; points per game + {{ prior_games }} &times; expected from rank) &divide; (games + {{ prior_games }})</div>
+  <p>Early in the season the ranking carries most of the weight, so a hot start moves a player up without making him a star. By November his own scoring counts for most of it. A week he scored exactly 0 is treated as a week he didn't play, because Sleeper doesn't say who was active.</p>
+
+  <h3>Replacement level and value</h3>
+  <p>To find replacement level, every team's starting lineup is filled from all the league's rosters, best projections first: the regular slots, then the flex spots.{% if superflex %} Superflex spots mostly go to quarterbacks, which is why QBs are worth so much here.{% endif %} The best player left over at each position sets its replacement level. Players on IR or the taxi squad sit this out, since they can't start. A player's value is his projection minus that level, and never below 0, because a player who's no better than a replacement isn't worth anything in a trade.</p>
+  <p>Right now replacement level is {% for pos, level in replacement_levels %}{{ pos }} {{ level | fmt2 }}{% if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %} points per week.</p>
+
+  {% if trade_example %}
+  {% set pv = trade_example.pv %}
+  <h3>Worked example: {{ pv.player.name }}</h3>
+  <div class="table-scroll">
+  <table class="data-table explainer-table">
+    <tbody>
+      <tr><td>Games</td><td>{{ pv.games }}</td></tr>
+      <tr><td>Points per game</td><td>{{ pv.ppg | fmt2 }}</td></tr>
+      <tr><td>Expected from his rank</td><td>{{ pv.prior | fmt2 }}</td></tr>
+      <tr><td>Projection</td><td>({{ pv.games }} &times; {{ pv.ppg | fmt2 }} + {{ prior_games }} &times; {{ pv.prior | fmt2 }}) &divide; {{ pv.games + prior_games }} = {{ pv.projection | fmt2 }}</td></tr>
+      <tr><td>Replacement {{ pv.player.position }}</td><td>{{ trade_example.replacement | fmt2 }}</td></tr>
+      <tr class="total-row"><td>Value</td><td>{{ pv.value | fmt2 }}</td></tr>
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  <h3>The verdict</h3>
+  <p>The calculator adds up the value each team receives. A gap under {{ fair_gap | fmt2 }} points a week, or under {{ "%.0f" | format(verdict_bands[0] * 100) }}% of the bigger side, is a fair trade. Up to {{ "%.0f" | format(verdict_bands[1] * 100) }}% is a slight edge, up to {{ "%.0f" | format(verdict_bands[2] * 100) }}% favors one side, and anything more is lopsided. When one side is ahead, the calculator suggests players from that team's roster that would even it up.</p>
+  <p>Value isn't the whole story, so the calculator also rebuilds both teams' best lineups with and without the deal. Two good players for one great one can lose on value and still help, if one of the two would have sat on the bench anyway. It also warns when a team would have to drop someone to stay under the roster limit. Injuries aren't priced in (watch for the tags next to players' names), and draft picks can't be valued.</p>
+</section>
+{% endif %}
+
 <section id="rivalries">
   <h2>Rivalries</h2>
   <p>The Rivalries page keeps every manager's head-to-head record against every other manager, across all seasons on the site, regular season only. A record follows the person's Sleeper account rather than the roster, so a manager who takes over an orphaned team starts from scratch instead of inheriting the old owner's history.{% if league_average_match %} Games against the league median don't count, since beating the median isn't beating anyone.{% endif %} <em>Most one-sided</em> and <em>most even</em> only consider rivalries with at least four meetings, and the <em>longest active streak</em> only counts pairs where both managers are still in the league.</p>

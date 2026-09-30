@@ -784,3 +784,131 @@ def test_rivalries_use_sleeper_names_over_team_names():
     managers = {m.owner_id: m for m in build_rivalries([season])}
     assert managers["ann"].name == "AnnOnSleeper"
     assert managers["bob"].name == "bob-2025"  # no display name: fall back to the team
+
+
+def test_player_weekly_points_covers_bench_and_ir(rosters, matchups_week5):
+    from ffpr.compute import player_weekly_points
+
+    weekly = player_weekly_points({5: matchups_week5})
+    for m in matchups_week5:
+        for pid, pts in m["players_points"].items():
+            assert weekly[pid] == {5: pts}
+    on_ir = {pid for r in rosters for pid in r.get("reserve") or []}
+    assert on_ir & set(weekly)  # IR players still score, so they still count
+
+
+def test_rank_prior_reads_the_fit_inside_its_range():
+    import pytest
+
+    from ffpr.compute import rank_prior
+
+    # Exactly linear in log(rank): 20 at #1, 14 at #10, 8 at #100.
+    prior = rank_prior([(1, 20.0, 4), (10, 14.0, 4), (100, 8.0, 4)])
+    assert prior(1) == pytest.approx(20.0)
+    assert prior(10) == pytest.approx(14.0)
+    assert prior(100) == pytest.approx(8.0)
+    assert prior(1000) == prior(100)  # never extrapolated
+    assert prior(None) == prior(100)  # unranked reads the bottom of the fit
+
+
+def test_rank_prior_falls_back_to_the_position_average():
+    from ffpr.compute import rank_prior
+
+    backwards = rank_prior([(1, 5.0, 1), (10, 10.0, 1), (100, 15.0, 2)])
+    assert backwards(1) == backwards(100) == (5.0 + 10.0 + 2 * 15.0) / 4
+    defenses = rank_prior([(None, 6.0, 2), (None, 9.0, 1)])  # no Sleeper rank at all
+    assert defenses(None) == 7.0
+    assert rank_prior([])(5) == 0.0
+
+
+def test_replacement_levels_give_superflex_slots_to_quarterbacks():
+    from ffpr.compute import replacement_levels
+
+    qbs = [_p(f"qb{i}", "QB", 25.0 - i) for i in range(6)]  # 25, 24, ... 20
+    rbs = [_p(f"rb{i}", "RB", 18.0 - 2 * i) for i in range(6)]  # 18, 16, ... 8
+    levels = replacement_levels(qbs + rbs, ["QB", "RB", "FLEX", "SUPER_FLEX", "BN"], num_teams=2)
+    # QB slots take 25 and 24, RB slots 18 and 16, FLEX (narrower) 14 and 12,
+    # then SUPER_FLEX takes QBs 23 and 22 over RB 10. WR and TE have nobody.
+    assert levels == {"QB": 21.0, "RB": 10.0}
+
+
+def test_replacement_level_falls_back_to_the_weakest_starter():
+    from ffpr.compute import replacement_levels
+
+    levels = replacement_levels([_p("k1", "K", 9.0), _p("k2", "K", 7.5)], ["K"], num_teams=2)
+    assert levels == {"K": 7.5}
+
+
+def test_build_trade_values_blends_scoring_with_rank():
+    from ffpr.compute import build_trade_values
+
+    raw = {
+        1: [
+            {"roster_id": 1, "players_points": {"a": 30.0, "b": 10.0, "c": 0.0}},
+            {"roster_id": 2, "players_points": {"d": 12.0, "e": 8.0}},
+        ],
+        2: [
+            {"roster_id": 1, "players_points": {"a": 20.0, "b": 12.0, "c": 0.0}},
+            {"roster_id": 2, "players_points": {"d": 14.0, "e": 6.0}},
+        ],
+    }
+    ranks = {"a": 5, "b": 50, "c": 80, "d": 20, "e": 200}
+    players_map = {
+        pid: {"full_name": pid, "position": "WR", "search_rank": r} for pid, r in ranks.items()
+    }
+    rosters = [
+        {"roster_id": 1, "players": ["a", "b", "c"], "reserve": ["c"]},
+        {"roster_id": 2, "players": ["d", "e"]},
+    ]
+    tv = build_trade_values(raw, rosters, players_map, ["WR", "BN"], weeks_left=3, prior_games=2)
+
+    a = tv.players["a"]
+    assert (a.games, a.ppg) == (2, 25.0)
+    assert a.projection == round((2 * 25.0 + 2 * a.prior) / 4, 2)
+    assert tv.players["a"].prior > tv.players["e"].prior  # better rank, higher expectation
+    c = tv.players["c"]
+    assert c.games == 0 and c.projection == c.prior  # zeros read as weeks off
+    assert not c.active and tv.players["a"].active
+
+    # One WR slot per team: the two best active WRs start and the third sets
+    # replacement level. c is on IR, so he's out of that pool.
+    ranked = sorted((tv.players[pid].projection for pid in "abde"), reverse=True)
+    assert tv.replacement == {"WR": ranked[2]}
+    for pv in tv.players.values():
+        assert pv.value == round(max(0.0, pv.projection - ranked[2]), 2)
+    assert tv.rosters[1][0] == "a"  # most valuable first
+    assert (tv.roster_limit, tv.weeks_left) == (2, 3)
+
+
+def test_build_trade_values_on_a_real_week(rosters, matchups_week5, players, league):
+    from ffpr.compute import build_trade_values
+
+    tv = build_trade_values({5: matchups_week5}, rosters, players, league["roster_positions"])
+    rostered = {pid for r in rosters for pid in r["players"]}
+    assert {pid for pids in tv.rosters.values() for pid in pids} == rostered
+    for pids in tv.rosters.values():
+        values = [tv.players[pid].value for pid in pids]
+        assert values == sorted(values, reverse=True)
+    for pid in rostered:
+        pv = tv.players[pid]
+        assert pv.value == round(max(0.0, pv.projection - tv.replacement[pv.player.position]), 2)
+    assert not any(tv.players[pid].active for r in rosters for pid in r.get("reserve") or [])
+    assert set(tv.replacement) == set(POSITIONS)
+    assert tv.replacement["QB"] > tv.replacement["RB"]  # superflex makes QBs scarce
+    assert tv.roster_limit == 17  # 11 starters + 6 bench
+
+    assert len(tv.strength) == len(rosters)
+    assert [r.rank for r in tv.strength] == sorted(r.rank for r in tv.strength)
+    for row in tv.strength:
+        assert abs(sum(row.points.values()) - row.total) < 0.02  # every starter has a position
+
+
+def test_trade_verdict_bands():
+    from ffpr.compute import trade_verdict
+
+    assert trade_verdict([0.0, 0.0]) == ("even", None)
+    assert trade_verdict([10.0, 9.5]) == ("fair", None)  # 5% apart
+    assert trade_verdict([3.0, 2.2]) == ("fair", None)  # 27% apart, but under a point a week
+    assert trade_verdict([10.0, 8.0]) == ("slight edge", 0)
+    assert trade_verdict([6.0, 10.0]) == ("favors", 1)
+    assert trade_verdict([10.0, 2.0]) == ("lopsided", 0)
