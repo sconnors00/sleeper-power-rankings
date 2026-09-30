@@ -559,3 +559,41 @@ def test_how_it_works_explains_trade_values(
     assert f"Worked example: {escape(top.player.name)}" in section
     assert f"= {top.projection:.2f}" in section
     assert "10%" in section and "25%" in section and "50%" in section
+
+
+def test_rosters_page_and_json_agree(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import build_roster_report
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.roster_report = build_roster_report(
+        rosters, players, league["roster_positions"], 200, {5: transactions_week5}
+    )
+    out = tmp_path / "site"
+    render_site(season, out)
+
+    data = json.loads((out / "rosters.json").read_text())
+    assert data["season"] == season.season and data["faab_budget"] == 200
+    assert [t["roster_id"] for t in data["teams"]] == sorted(r["roster_id"] for r in rosters)
+    for t in data["teams"]:
+        assert t["faab"]["used"] + t["faab"]["remaining"] == 200
+        assert set(t) >= {"starters", "bench", "ir", "taxi", "faab_claims", "record", "owner"}
+    assert (out / "rosters.json").read_text() == (
+        render_site(season, tmp_path / "again") or (tmp_path / "again" / "rosters.json").read_text()
+    )  # deterministic: no timestamps
+
+    html = (out / "rosters.html").read_text()
+    assert 'href="rosters.json"' in html
+    faab = html.split('id="faab"')[1].split("</section>")[0]
+    for t in data["teams"]:
+        assert f"${t['faab']['remaining']}" in faab
+        assert f'id="team-{t["roster_id"]}"' in html
+    assert html.count('id="team-') == len(rosters)
+    assert 'href="rosters.html"' in (out / "index.html").read_text()
+
+
+def test_no_rosters_page_without_a_report(tmp_path, teams_only_season):
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    assert not (out / "rosters.html").exists() and not (out / "rosters.json").exists()

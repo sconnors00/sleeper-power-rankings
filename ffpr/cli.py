@@ -21,6 +21,7 @@ from ffpr.compute import (
     build_preseason_rankings,
     build_provisional_week_summary,
     build_rivalries,
+    build_roster_report,
     build_season_board,
     build_teams,
     build_trade_values,
@@ -347,6 +348,13 @@ def _build_season_summary(
         remaining_weeks=len(remaining),
         acquisitions=grade_acquisitions(transactions_raw, week_summaries, players),
         trade_values=trade_values,
+        roster_report=build_roster_report(
+            rosters,
+            players,
+            league_obj["roster_positions"],
+            int(league_obj["settings"].get("waiver_budget") or 0),
+            transactions_raw,
+        ),
     )
 
 

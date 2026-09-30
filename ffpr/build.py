@@ -354,6 +354,67 @@ RANKING_COMPONENTS = {
 }
 
 
+def _spot_json(spot) -> dict:
+    return {
+        "slot": spot.slot,
+        "player_id": spot.player_id,
+        "name": spot.name,
+        "position": spot.position,
+        "nfl_team": spot.nfl_team,
+        "injury": spot.injury,
+    }
+
+
+def build_rosters_json(season: SeasonSummary) -> str:
+    """rosters.json: the same rosters and FAAB the page shows, for scripts.
+
+    Stable keys and ordering, no timestamps, so a rebuild with unchanged
+    league data produces an identical file.
+    """
+    report = season.roster_report
+    teams = []
+    for tr in report.teams:
+        team = season.teams[tr.roster_id]
+        teams.append(
+            {
+                "roster_id": tr.roster_id,
+                "team_name": team.name,
+                "owner": team.owner_name,
+                "owner_id": team.owner_id,
+                "record": tr.record,
+                "faab": {
+                    "budget": report.faab_budget,
+                    "used": tr.faab_used,
+                    "remaining": tr.faab_remaining,
+                },
+                "starters": [_spot_json(p) for p in tr.starters],
+                "bench": [_spot_json(p) for p in tr.bench],
+                "ir": [_spot_json(p) for p in tr.ir],
+                "taxi": [_spot_json(p) for p in tr.taxi],
+                "faab_claims": [
+                    {
+                        "week": c.week,
+                        "player_id": c.player.player_id,
+                        "player": c.player.name,
+                        "position": c.player.position,
+                        "bid": c.bid,
+                        "dropped": c.dropped,
+                    }
+                    for c in tr.claims
+                ],
+            }
+        )
+    payload = {
+        "season": season.season,
+        "league": season.league_name,
+        "through_week": season.through_week,
+        "roster_positions": season.roster_positions,
+        "faab_budget": report.faab_budget,
+        "teams": teams,
+    }
+    return json.dumps(payload, indent=2) + "\n"
+
+
 def _has_trades_page(season: SeasonSummary) -> bool:
     return season.trade_values is not None or bool(
         season.acquisitions and season.acquisitions.trades
@@ -552,6 +613,7 @@ def render_site(
         "has_season": bool(season.weeks),
         "has_rivalries": bool(rivalries),
         "has_trades": _has_trades_page(season),
+        "has_rosters": season.roster_report is not None,
         "all_seasons": all_seasons or [season.season],
         "site_root_prefix": site_root_prefix,
         "year_url": _year_url,
@@ -602,6 +664,13 @@ def render_site(
             **common, **_trades_context(season), teams=season.teams, asset_prefix=""
         )
         (output_dir / "trades.html").write_text(html)
+
+    if season.roster_report is not None:
+        html = env.get_template("rosters.html").render(
+            **common, report=season.roster_report, teams=season.teams, asset_prefix=""
+        )
+        (output_dir / "rosters.html").write_text(html)
+        (output_dir / "rosters.json").write_text(build_rosters_json(season))
 
     how_template = env.get_template("how_it_works.html")
     html = how_template.render(**common, **_how_it_works_context(season), asset_prefix="")

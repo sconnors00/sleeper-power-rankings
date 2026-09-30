@@ -16,6 +16,7 @@ from ffpr.models import (
     AcquisitionSummary,
     DraftPickGrade,
     DraftSummary,
+    FaabClaim,
     GameRecord,
     HeadToHead,
     LineupRow,
@@ -30,6 +31,8 @@ from ffpr.models import (
     PositionRankRow,
     PowerRankRow,
     PreseasonRow,
+    RosterReport,
+    RosterSpot,
     SeasonBoard,
     SeasonBoardEntry,
     SeasonLineupRow,
@@ -37,6 +40,7 @@ from ffpr.models import (
     SeasonSummary,
     Team,
     TeamDraftGrade,
+    TeamRoster,
     TeamRosterMoves,
     TeamStrengthRow,
     TradeGrade,
@@ -1654,3 +1658,77 @@ def rivalry_highlights(managers: list[Manager], min_meetings: int = 4) -> dict:
             if result == "W" and both_current and (streak is None or run > streak[2]):
                 streak = (manager, h, run)
     return {"one_sided": one_sided, "even": even, "streak": streak}
+
+
+# --- Rosters and FAAB ---
+
+
+def build_roster_report(
+    rosters: list[dict],
+    players_map: dict,
+    roster_positions: list[str],
+    faab_budget: int,
+    weeks_raw_transactions: dict[int, list[dict]],
+) -> RosterReport:
+    """Every team's roster split into lineup, bench, IR and taxi, with FAAB.
+
+    Sleeper's `starters` list runs in the order of the league's lineup slots
+    (bench, IR and taxi aside), so slot names come from roster_positions.
+    FAAB left is the budget minus `waiver_budget_used`, which Sleeper keeps
+    current through FAAB traded between teams. Claims are the completed
+    waiver bids in the transactions log.
+    """
+    slots = [s for s in roster_positions if s not in NON_STARTING_SLOTS]
+
+    def spot(pid: str, slot: str) -> RosterSpot:
+        info = players_map.get(pid) or {}
+        player = _player_score(pid, 0.0, players_map)
+        return RosterSpot(
+            pid, player.name, player.position, player.nfl_team, info.get("injury_status"), slot
+        )
+
+    claims: dict[int, list[FaabClaim]] = {}
+    for week in sorted(weeks_raw_transactions):
+        txs = [t for t in weeks_raw_transactions[week] if t.get("status") == "complete"]
+        for tx in sorted(txs, key=lambda t: t.get("status_updated") or t.get("created") or 0):
+            bid = (tx.get("settings") or {}).get("waiver_bid")
+            if tx.get("type") != "waiver" or bid is None:
+                continue
+            dropped = [_player_score(pid, 0.0, players_map).name for pid in tx.get("drops") or {}]
+            for pid, rid in (tx.get("adds") or {}).items():
+                claims.setdefault(rid, []).append(
+                    FaabClaim(week, _player_score(pid, 0.0, players_map), int(bid), dropped)
+                )
+
+    teams = []
+    for r in sorted(rosters, key=lambda r: r["roster_id"]):
+        rid = r["roster_id"]
+        held = list(r.get("players") or [])
+        starter_ids = list(r.get("starters") or [])
+        ir_ids = [p for p in r.get("reserve") or [] if p in held]
+        taxi_ids = [p for p in r.get("taxi") or [] if p in held]
+        placed = {p for p in starter_ids if p != "0"} | set(ir_ids) | set(taxi_ids)
+        starters = [
+            spot(pid, slots[i] if i < len(slots) else "?")
+            for i, pid in enumerate(starter_ids)
+            if pid != "0"
+        ]
+        bench = sorted(
+            (spot(pid, "BN") for pid in held if pid not in placed),
+            key=lambda p: (POSITIONS.index(p.position) if p.position in POSITIONS else 99, p.name),
+        )
+        used = int((r.get("settings") or {}).get("waiver_budget_used") or 0)
+        teams.append(
+            TeamRoster(
+                roster_id=rid,
+                record=official_record_string(r),
+                starters=starters,
+                bench=bench,
+                ir=[spot(pid, "IR") for pid in ir_ids],
+                taxi=[spot(pid, "TAXI") for pid in taxi_ids],
+                faab_used=used,
+                faab_remaining=faab_budget - used,
+                claims=claims.get(rid, []),
+            )
+        )
+    return RosterReport(faab_budget=faab_budget, teams=teams)

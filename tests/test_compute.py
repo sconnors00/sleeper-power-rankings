@@ -912,3 +912,27 @@ def test_trade_verdict_bands():
     assert trade_verdict([10.0, 8.0]) == ("slight edge", 0)
     assert trade_verdict([6.0, 10.0]) == ("favors", 1)
     assert trade_verdict([10.0, 2.0]) == ("lopsided", 0)
+
+
+def test_build_roster_report_splits_slots_and_tracks_faab(
+    rosters, transactions_week5, players, league
+):
+    from ffpr.compute import build_roster_report
+
+    report = build_roster_report(
+        rosters, players, league["roster_positions"], 200, {5: transactions_week5}
+    )
+    assert [t.roster_id for t in report.teams] == sorted(r["roster_id"] for r in rosters)
+    for t, r in zip(report.teams, sorted(rosters, key=lambda r: r["roster_id"]), strict=True):
+        assert sorted(p.player_id for p in t.players) == sorted(
+            r["players"]
+        )  # nobody lost or doubled
+        assert t.faab_used + t.faab_remaining == 200
+        assert t.faab_used == r["settings"]["waiver_budget_used"]
+        assert {p.player_id for p in t.ir} == set(r.get("reserve") or []) & set(r["players"])
+    first = report.teams[0]
+    assert [p.slot for p in first.starters][:3] == ["QB", "RB", "RB"]
+    assert all(p.slot == "BN" for p in first.bench)
+    waivers = [t for t in transactions_week5 if t["type"] == "waiver" and t["status"] == "complete"]
+    claims = [c for t in report.teams for c in t.claims]
+    assert sorted(c.bid for c in claims) == sorted(t["settings"]["waiver_bid"] for t in waivers)

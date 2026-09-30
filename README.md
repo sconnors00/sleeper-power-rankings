@@ -93,6 +93,23 @@ log for that week (waivers with the FAAB bid, free agent pickups, trades).
 Failed transactions (an outbid claim, a vetoed trade) never happened, so
 they're excluded.
 
+### Rosters and FAAB
+
+`rosters.html` ("Rosters" in the nav) lists every team's lineup (with slot
+names), bench, IR and taxi squad, FAAB remaining and spent, and the waiver
+bids each team won. The same data is served as `rosters.json` next to it
+(`site/rosters.json`, and `site/<year>/rosters.json` per season) for scripts:
+stable keys and ordering, no timestamps.
+
+```bash
+curl -s https://sconnors00.github.io/sleeper-power-rankings/rosters.json \
+  | jq '.teams[] | {team_name, faab_remaining: .faab.remaining}'
+```
+
+FAAB remaining is `waiver_budget` minus each roster's `waiver_budget_used`, so
+it includes FAAB traded between teams. It's 0 for leagues without a FAAB
+budget.
+
 ### Trade calculator and analyzer
 
 `trades.html` ("Trades" in the nav) has:

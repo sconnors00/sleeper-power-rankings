@@ -394,6 +394,47 @@ class TradeValues:
 
 
 @dataclass
+class RosterSpot:
+    player_id: str
+    name: str
+    position: str
+    nfl_team: str | None
+    injury: str | None  # Sleeper's injury_status, e.g. "Questionable", "IR"
+    slot: str  # lineup slot for starters ("QB", "FLEX", ...); "BN", "IR" or "TAXI" otherwise
+
+
+@dataclass
+class FaabClaim:
+    week: int
+    player: PlayerScore  # points field unused here
+    bid: int
+    dropped: list[str]  # names of the players dropped to make room
+
+
+@dataclass
+class TeamRoster:
+    roster_id: int
+    record: str
+    starters: list[RosterSpot]
+    bench: list[RosterSpot]
+    ir: list[RosterSpot]
+    taxi: list[RosterSpot]
+    faab_used: int
+    faab_remaining: int
+    claims: list[FaabClaim]  # winning waiver bids, oldest first
+
+    @property
+    def players(self) -> list[RosterSpot]:
+        return [*self.starters, *self.bench, *self.ir, *self.taxi]
+
+
+@dataclass
+class RosterReport:
+    faab_budget: int  # 0 when the league doesn't use FAAB
+    teams: list[TeamRoster]  # roster_id order
+
+
+@dataclass
 class SeasonSummary:
     season: str
     league_name: str
@@ -418,3 +459,4 @@ class SeasonSummary:
     remaining_weeks: int = 0  # regular-season weeks the odds simulate
     acquisitions: AcquisitionSummary | None = None
     trade_values: TradeValues | None = None  # current season only
+    roster_report: RosterReport | None = None
