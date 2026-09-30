@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Trades &middot; {{ league_name }}{% endblock %}
+{% block content %}
+
+<h1 class="page-title">Trades</h1>
+
+{% if values %}
+<section id="calculator">
+  <h2>Trade calculator</h2>
+  <p class="note">Pick two teams and tap the players each one sends. A player's value is how many more points a week he's projected to score than a replacement-level starter at his position. The verdict compares the value each team gets, and the lineup check shows what the deal does to each team's best starting lineup. <a href="how-it-works.html#trade-values">How this works</a></p>
+  {% if trade_deadline %}
+  <p class="note">{% if deadline_passed %}The trade deadline (Week {{ trade_deadline }}) has passed, so this is for what-ifs only.{% else %}Trade deadline: Week {{ trade_deadline }}.{% endif %}</p>
+  {% endif %}
+  <div id="trade-calculator" class="trade-calc">
+    <div class="trade-sides">
+      {% for side in (0, 1) %}
+      <div class="trade-side" data-side="{{ side }}">
+        <label class="trade-team-label">{{ "First" if side == 0 else "Second" }} team sends
+          <select class="trade-team">
+            {% for t in calc_teams %}
+            <option value="{{ t.roster_id }}"{% if loop.index0 == side %} selected{% endif %}>{{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="trade-picked"></div>
+        <div class="trade-roster"></div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="trade-result" aria-live="polite">
+      <noscript><p class="note">The calculator needs JavaScript; the tables below work without it.</p></noscript>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if trade_history %}
+<section id="history">
+  <h2>{{ "This season's trades" if values else "Trades" }}</h2>
+  <p class="note">Each side's haul: points the players it received have scored in its starting lineup since the trade{% if values %}, and what they're worth from here on (projected points per week above replacement){% endif %}. Draft picks are listed but not scored. <a href="how-it-works.html#pickups">How this works</a></p>
+  {% for t in trade_history %}
+  <h3>Week {{ t.week }} &middot; {% if t.lead > 0.005 %}<span class="up">{{ t.leader.name }} +{{ t.lead | fmt2 }}</span>{% else %}even{% endif %}{% if values %} so far{% endif %}
+    {%- if t.forward %} &middot; going forward: {% if t.forward.verdict == "slight edge" %}slight edge to {{ t.forward.team.name }}{% elif t.forward.verdict == "favors" %}favors {{ t.forward.team.name }}{% elif t.forward.verdict == "lopsided" %}lopsided for {{ t.forward.team.name }}{% else %}{{ t.forward.verdict }}{% endif %}{% endif %}</h3>
+  <div class="table-scroll">
+  <table class="data-table explainer-table">
+    <thead><tr><th>Team</th><th>Received</th><th>Points since</th>{% if values %}<th>Value now</th>{% endif %}</tr></thead>
+    <tbody>
+      {% for r in t.rows %}
+      {% set side = r.side %}
+      <tr>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ r.team.color }}"></span>{{ r.team.name }}</td>
+        <td>{% for a in side.received %}{{ a.player.name }} ({% if a.starts %}{{ a.player.points | fmt2 }} in {{ a.starts }} start{{ "s" if a.starts != 1 }}{% else %}no starts yet{% endif %}){% if not loop.last or side.picks %}, {% endif %}{% endfor %}{% for pk in side.picks %}{{ pk }} pick{% if not loop.last %}, {% endif %}{% endfor %}{% if not side.received and not side.picks %}&mdash;{% endif %}</td>
+        <td>{% if loop.first and t.lead > 0.005 %}<strong class="up">{{ side.points | fmt2 }}</strong>{% else %}{{ side.points | fmt2 }}{% endif %}</td>
+        {% if values %}<td>{{ r.value | fmt2 }}</td>{% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if values %}
+<section id="strength">
+  <h2>Projected lineups</h2>
+  <p class="note">Each team's best starting lineup from its current roster, in projected points per week, with its rank at each position (#1 = most). Flex starters count at their own position. A team ranked low at a position is a natural buyer there.</p>
+  <div class="table-scroll">
+  <table class="data-table">
+    <thead><tr><th>#</th><th>Team</th><th>Lineup</th>{% for pos in positions %}<th>{{ pos }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for entry in strength_rows %}
+      {% set r = entry.row %}
+      <tr>
+        <td>{{ r.rank }}</td>
+        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
+        <td><strong>{{ r.total | fmt2 }}</strong></td>
+        {% for pos in positions %}
+        {% set rank = r.ranks[pos] %}
+        {% set lo, hi = strength_extremes[pos] %}
+        <td{% if lo != hi and rank == lo %} class="pos-best"{% elif lo != hi and rank == hi %} class="pos-worst"{% endif %}>{{ r.points[pos] | fmt2 }} <span class="pos-rank">#{{ rank }}</span></td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="values">
+  <h2>Player values</h2>
+  <p class="note">Every rostered player by position. <em>Scored</em> is his average in the games he's played this season; <em>Proj.</em> blends that with what his Sleeper ranking implies; <em>Value</em> is the projection above the position's replacement level. Tap a position to open it.</p>
+  {% for group in value_board %}
+  <details class="fold">
+    <summary>{{ group.position }} <span class="note-inline">replacement level {{ group.replacement | fmt2 }}</span></summary>
+    <div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Scored</th><th>Proj.</th><th>Value</th></tr></thead>
+      <tbody>
+        {% for pv in group.rows %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ pv.player.name }} <span class="note-inline">{{ pv.player.nfl_team or "FA" }}</span>{% if pv.injury %} <span class="inj">{{ pv.injury }}</span>{% endif %}</td>
+          <td class="team-cell"><span class="team-swatch" style="background:{{ teams[pv.roster_id].color }}"></span>{{ teams[pv.roster_id].name }}</td>
+          <td>{% if pv.games %}{{ pv.ppg | fmt2 }} <span class="note-inline">in {{ pv.games }}</span>{% else %}&mdash;{% endif %}</td>
+          <td>{{ pv.projection | fmt2 }}</td>
+          <td><strong>{{ pv.value | fmt2 }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% endblock %}

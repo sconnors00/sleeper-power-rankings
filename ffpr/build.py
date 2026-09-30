@@ -12,9 +12,14 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from ffpr.compute import (
     DEFAULT_FORM_WINDOW,
     DEFAULT_WEIGHTS,
+    FAIR_TRADE_GAP,
+    FLEX_ELIGIBILITY,
     PLAYOFF_SIMS,
     POSITIONS,
+    PRIOR_GAMES,
+    TRADE_VERDICT_BANDS,
     rivalry_highlights,
+    trade_verdict,
 )
 from ffpr.models import Manager, SeasonSummary
 
@@ -189,7 +194,42 @@ def build_data_js(season: SeasonSummary) -> str:
         "pfVsPa": pf_vs_pa,
         "benchPoints": bench_points,
     }
+    trade = _trade_payload(season)
+    if trade is not None:
+        payload["trade"] = trade
     return "window.FFPR = " + json.dumps(payload) + ";\n"
+
+
+def _trade_payload(season: SeasonSummary) -> dict | None:
+    """What the trade calculator needs: every rostered player's value and
+    projection, who holds whom, and the rules it has to mirror (lineup slots,
+    flex eligibility, verdict bands) so the numbers can't drift from Python's."""
+    tv = season.trade_values
+    if tv is None:
+        return None
+    players = {}
+    for pids in tv.rosters.values():
+        for pid in pids:
+            pv = tv.players[pid]
+            players[pid] = {
+                "name": pv.player.name,
+                "pos": pv.player.position,
+                "nfl": pv.player.nfl_team,
+                "proj": pv.projection,
+                "value": pv.value,
+                "injury": pv.injury,
+                "active": pv.active,
+            }
+    return {
+        "rosterPositions": season.roster_positions,
+        "flex": {slot: sorted(eligible) for slot, eligible in FLEX_ELIGIBILITY.items()},
+        "rosterLimit": tv.roster_limit,
+        "weeksLeft": tv.weeks_left,
+        "fairGap": FAIR_TRADE_GAP,
+        "bands": list(TRADE_VERDICT_BANDS),
+        "players": players,
+        "rosters": {str(rid): pids for rid, pids in tv.rosters.items()},
+    }
 
 
 def _matchup_pair(wk, matchup_id: int, teams: dict) -> list[dict]:
@@ -314,6 +354,110 @@ RANKING_COMPONENTS = {
 }
 
 
+def _has_trades_page(season: SeasonSummary) -> bool:
+    return season.trade_values is not None or bool(
+        season.acquisitions and season.acquisitions.trades
+    )
+
+
+def _trades_context(season: SeasonSummary) -> dict:
+    """The trades page: this season's trades judged on points so far and --
+    while the season is live -- on value going forward, plus the calculator's
+    team list, each team's projected strength, and the player value board."""
+    tv = season.trade_values
+    teams = season.teams
+
+    history = []
+    for trade in season.acquisitions.trades if season.acquisitions else []:
+        if not trade.sides:
+            continue
+        rows = []
+        for side in trade.sides:
+            value = None
+            if tv is not None:
+                value = round(
+                    sum(
+                        tv.players[a.player.player_id].value
+                        for a in side.received
+                        if a.player.player_id in tv.players
+                    ),
+                    2,
+                )
+            rows.append({"side": side, "team": teams[side.roster_id], "value": value})
+        leader = trade.sides[0]
+        forward = None
+        if tv is not None:
+            verdict, ahead = trade_verdict([r["value"] for r in rows])
+            forward = {
+                "verdict": verdict,
+                "team": rows[ahead]["team"] if ahead is not None else None,
+            }
+        history.append(
+            {
+                "week": trade.week,
+                "rows": rows,
+                "leader": teams[leader.roster_id],
+                "lead": leader.points - (trade.sides[1].points if len(trade.sides) > 1 else 0.0),
+                "forward": forward,
+            }
+        )
+
+    ctx: dict = {"trade_history": history, "values": tv, "weeks_left": 0}
+    if tv is None:
+        return ctx
+
+    rostered = [pv for pv in tv.players.values() if pv.roster_id is not None]
+    board = []
+    for pos in [*POSITIONS, *sorted(set(tv.replacement) - set(POSITIONS))]:
+        rows = sorted(
+            (pv for pv in rostered if pv.player.position == pos),
+            key=lambda pv: (-pv.value, -pv.projection, pv.player.name),
+        )
+        if pos in tv.replacement and rows:
+            board.append({"position": pos, "replacement": tv.replacement[pos], "rows": rows})
+
+    extremes = {}
+    for pos in POSITIONS:
+        ranks = [row.ranks[pos] for row in tv.strength]
+        extremes[pos] = (min(ranks), max(ranks)) if ranks else (1, 1)
+
+    ctx.update(
+        {
+            "calc_teams": sorted(
+                (teams[rid] for rid in tv.rosters if rid in teams), key=lambda t: t.name.lower()
+            ),
+            "value_board": board,
+            "strength_rows": [{"team": teams[row.roster_id], "row": row} for row in tv.strength],
+            "strength_extremes": extremes,
+            "positions": POSITIONS,
+            "weeks_left": tv.weeks_left,
+            "trade_deadline": tv.trade_deadline,
+            "deadline_passed": (
+                tv.trade_deadline is not None and season.through_week >= tv.trade_deadline
+            ),
+        }
+    )
+    return ctx
+
+
+def _trade_example(season: SeasonSummary) -> dict | None:
+    """The most valuable rostered player with games played, for the worked example."""
+    tv = season.trade_values
+    if tv is None:
+        return None
+    candidates = [
+        pv for pv in tv.players.values() if pv.roster_id is not None and pv.games and pv.value > 0
+    ]
+    if not candidates:
+        return None
+    pv = max(candidates, key=lambda pv: (pv.value, pv.player.name))
+    return {
+        "pv": pv,
+        "team": season.teams.get(pv.roster_id),
+        "replacement": tv.replacement[pv.player.position],
+    }
+
+
 def _how_it_works_context(season: SeasonSummary) -> dict:
     """The live numbers the explainer quotes, so it can't drift from the code."""
     weights = season.weights or DEFAULT_WEIGHTS
@@ -347,7 +491,23 @@ def _how_it_works_context(season: SeasonSummary) -> dict:
         "playoff_sims": PLAYOFF_SIMS,
         "playoff_teams": season.playoff_teams,
         "playoff_byes": season.playoff_byes,
+        "trade_values": season.trade_values,
+        "trade_example": _trade_example(season),
+        "prior_games": (
+            season.trade_values.prior_games if season.trade_values is not None else PRIOR_GAMES
+        ),
+        "fair_gap": FAIR_TRADE_GAP,
+        "verdict_bands": TRADE_VERDICT_BANDS,
+        "superflex": "SUPER_FLEX" in season.roster_positions,
+        "replacement_levels": _replacement_in_order(season),
     }
+
+
+def _replacement_in_order(season: SeasonSummary) -> list[tuple[str, float]]:
+    """Replacement levels in the site's usual position order."""
+    levels = season.trade_values.replacement if season.trade_values is not None else {}
+    order = [*POSITIONS, *sorted(set(levels) - set(POSITIONS))]
+    return [(pos, levels[pos]) for pos in order if pos in levels]
 
 
 def render_site(
@@ -391,6 +551,7 @@ def render_site(
         "has_draft": season.draft is not None,
         "has_season": bool(season.weeks),
         "has_rivalries": bool(rivalries),
+        "has_trades": _has_trades_page(season),
         "all_seasons": all_seasons or [season.season],
         "site_root_prefix": site_root_prefix,
         "year_url": _year_url,
@@ -434,6 +595,13 @@ def render_site(
             highlights=rivalry_highlights(rivalries),
         )
         (output_dir / "rivalries.html").write_text(html)
+
+    if _has_trades_page(season):
+        trades_template = env.get_template("trades.html")
+        html = trades_template.render(
+            **common, **_trades_context(season), teams=season.teams, asset_prefix=""
+        )
+        (output_dir / "trades.html").write_text(html)
 
     how_template = env.get_template("how_it_works.html")
     html = how_template.render(**common, **_how_it_works_context(season), asset_prefix="")

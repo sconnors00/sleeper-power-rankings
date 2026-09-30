@@ -15,6 +15,7 @@
   <nav class="site-nav">
     <a href="{{ asset_prefix }}index.html">Latest</a>
     {% if has_season %}<a href="{{ asset_prefix }}season.html">Season</a>{% endif %}
+    {% if has_trades %}<a href="{{ asset_prefix }}trades.html">Trades</a>{% endif %}
     {% if has_draft %}<a href="{{ asset_prefix }}draft.html">Draft</a>{% endif %}
     {% if has_rivalries %}<a href="{{ asset_prefix }}rivalries.html">Rivalries</a>{% endif %}
     <a href="{{ asset_prefix }}how-it-works.html">How it works</a>

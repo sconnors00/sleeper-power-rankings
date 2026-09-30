@@ -383,10 +383,19 @@ def test_season_page_grades_pickups_and_trades(
     assert best.player.name in pickups and f"{best.player.points:.2f}" in pickups
     assert pickups.count("<tr>") <= 11  # header + at most ten
 
-    trades = html.split('id="trades"')[1].split("</section>")[0]
-    assert "Week 5" in trades
+    # Trades are graded on their own page; the season page points there.
+    pointer = html.split('id="trades"')[1].split("</section>")[0]
+    assert "1 trade this season" in pointer and 'href="trades.html#history"' in pointer
+
+    page = (out / "trades.html").read_text()
+    history = page.split('id="history"')[1].split("</section>")[0]
+    assert "Week 5" in history
     for side in season.acquisitions.trades[0].sides:
-        assert season.teams[side.roster_id].name in trades
+        assert season.teams[side.roster_id].name in history
+    # No trade values (a finished season): history only, no calculator.
+    assert "Value now" not in history
+    assert 'id="calculator"' not in page
+    assert 'href="trades.html"' in (out / "index.html").read_text()
 
 
 def test_rivalries_page(
@@ -430,3 +439,123 @@ def test_how_it_works_covers_the_new_features(
     assert "10,000 times" in html
     assert "top 6 make it, with the top 2 getting byes" in html
     assert "league median" not in html.split('id="playoff-odds"')[1].split("</section>")[0]
+
+
+def _with_trade_values(season, rosters, matchups_week5, transactions_week5, players, league):
+    from ffpr.compute import build_trade_values, grade_acquisitions
+
+    season.acquisitions = grade_acquisitions({5: transactions_week5}, season.weeks, players)
+    season.trade_values = build_trade_values(
+        {5: matchups_week5},
+        rosters,
+        players,
+        league["roster_positions"],
+        weeks_left=9,
+        trade_deadline=12,
+    )
+    return season
+
+
+def test_trades_page_has_the_calculator_and_analysis(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from markupsafe import escape
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    _with_trade_values(season, rosters, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "trades.html").read_text()
+
+    calculator = html.split('id="calculator"')[1].split("</section>")[0]
+    assert 'id="trade-calculator"' in calculator
+    assert calculator.count('<select class="trade-team">') == 2
+    assert calculator.count("<option ") == 2 * len(rosters)
+    assert "Trade deadline: Week 12." in calculator
+
+    history = html.split('id="history"')[1].split("</section>")[0]
+    assert "Value now" in history and "going forward" in history
+
+    strength = html.split('id="strength"')[1].split("</section>")[0]
+    assert strength.count("team-cell") == len(rosters)
+    assert "pos-best" in strength and "pos-worst" in strength
+
+    values = html.split('id="values"')[1].split("</section>")[0]
+    assert values.count('<details class="fold">') == 6
+    top = max(season.trade_values.players.values(), key=lambda pv: pv.value)
+    assert str(escape(top.player.name)) in values
+    assert f"{top.value:.2f}" in values
+    assert 'href="trades.html"' in (out / "index.html").read_text()
+
+
+def test_trade_deadline_note_once_it_has_passed(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    _with_trade_values(season, rosters, matchups_week5, transactions_week5, players, league)
+    season.trade_values.trade_deadline = 5
+    out = tmp_path / "site"
+    render_site(season, out)
+    assert "The trade deadline (Week 5) has passed" in (out / "trades.html").read_text()
+
+
+def test_data_js_carries_the_calculator_payload(
+    rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import FAIR_TRADE_GAP, TRADE_VERDICT_BANDS
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    _with_trade_values(season, rosters, matchups_week5, transactions_week5, players, league)
+    content = build_data_js(season)
+    trade = json.loads(content[len("window.FFPR = ") : -2])["trade"]
+
+    assert trade["rosterPositions"] == league["roster_positions"]
+    assert trade["flex"]["SUPER_FLEX"] == ["QB", "RB", "TE", "WR"]
+    assert (trade["rosterLimit"], trade["weeksLeft"]) == (17, 9)
+    assert (trade["fairGap"], trade["bands"]) == (FAIR_TRADE_GAP, list(TRADE_VERDICT_BANDS))
+    assert set(trade["rosters"]) == {str(r["roster_id"]) for r in rosters}
+    for pids in trade["rosters"].values():
+        for pid in pids:
+            pv = season.trade_values.players[pid]
+            assert trade["players"][pid]["value"] == pv.value
+            assert trade["players"][pid]["proj"] == pv.projection
+            assert trade["players"][pid]["active"] == pv.active
+
+    season.trade_values = None
+    content = build_data_js(season)
+    assert "trade" not in json.loads(content[len("window.FFPR = ") : -2])
+
+
+def test_no_trades_page_without_trades_or_values(tmp_path, teams_only_season):
+    out = tmp_path / "site"
+    render_site(teams_only_season, out)
+    assert not (out / "trades.html").exists()
+    assert "trades.html" not in (out / "index.html").read_text()
+
+
+def test_how_it_works_explains_trade_values(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from markupsafe import escape
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "plain"
+    render_site(season, out)
+    assert 'id="trade-values"' not in (out / "how-it-works.html").read_text()
+
+    _with_trade_values(season, rosters, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "how-it-works.html").read_text()
+    section = html.split('id="trade-values"')[1].split("</section>")[0]
+    assert "counts as 5 games of evidence" in section
+    assert "Superflex spots mostly go to quarterbacks" in section
+    levels = season.trade_values.replacement
+    assert f"replacement level is QB {levels['QB']:.2f}, RB {levels['RB']:.2f}" in section
+    top = max(
+        (pv for pv in season.trade_values.players.values() if pv.roster_id and pv.games),
+        key=lambda pv: pv.value,
+    )
+    assert f"Worked example: {escape(top.player.name)}" in section
+    assert f"= {top.projection:.2f}" in section
+    assert "10%" in section and "25%" in section and "50%" in section

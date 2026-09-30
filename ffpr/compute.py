@@ -6,8 +6,10 @@ unit tested against committed fixtures.
 
 from __future__ import annotations
 
+import math
 import random
 import statistics
+from collections.abc import Callable
 
 from ffpr.models import (
     Acquisition,
@@ -23,6 +25,7 @@ from ffpr.models import (
     PFLeaderboardRow,
     PlayerMove,
     PlayerScore,
+    PlayerValue,
     PlayoffOddsRow,
     PositionRankRow,
     PowerRankRow,
@@ -35,8 +38,10 @@ from ffpr.models import (
     Team,
     TeamDraftGrade,
     TeamRosterMoves,
+    TeamStrengthRow,
     TradeGrade,
     TradeSide,
+    TradeValues,
     WeekAwards,
     WeekSummary,
 )
@@ -1328,6 +1333,250 @@ def grade_acquisitions(
     ]
     graded.reverse()
     return AcquisitionSummary(pickups=pickups, trades=graded)
+
+
+# --- Trade values ---
+#
+# A player's trade value is how many more points per week he should score than
+# the replacement-level starter at his position. His projection blends what he
+# has actually scored in this league's scoring with what Sleeper's player
+# ranking says a player like him scores, so three hot weeks don't make a star
+# and one bad week doesn't sink one.
+
+PRIOR_GAMES = 5  # games of evidence the ranking-based expectation is worth
+FAIR_TRADE_GAP = 1.0  # a value gap under this many points per week always reads as fair
+# Value gap as a share of the bigger side: under the first is fair, then a
+# slight edge, then favors; past the last it's lopsided.
+TRADE_VERDICT_BANDS = (0.10, 0.25, 0.50)
+INJURY_TAGS = {"Questionable": "Q", "Doubtful": "D"}
+
+
+def player_weekly_points(weeks_raw_matchups: dict[int, list[dict]]) -> dict[str, dict[int, float]]:
+    """Player id -> {week: points} for every week he was on a roster, bench and IR included."""
+    weekly: dict[str, dict[int, float]] = {}
+    for week, raw in weeks_raw_matchups.items():
+        for m in raw:
+            for pid, pts in (m.get("players_points") or {}).items():
+                weekly.setdefault(pid, {})[week] = pts or 0.0
+    return weekly
+
+
+def rank_prior(samples: list[tuple[int | None, float, int]]) -> Callable[[int | None], float]:
+    """Points per game a position's players score, as a function of Sleeper's
+    search_rank.
+
+    samples are (search_rank, points per game, games) for the position's
+    players who have scored. The fit is a least-squares line through points
+    per game against log(rank), each player weighted by his games, and it's
+    only read inside the ranks it was fitted on, never extrapolated: unranked
+    players (team defenses, deep stashes) read the bottom of it. Without a
+    usable fit -- too few ranked players, or better-ranked players not
+    outscoring worse ones -- everyone gets the position's average.
+    """
+    games = sum(g for _, _, g in samples)
+    average = max(0.0, sum(ppg * g for _, ppg, g in samples) / games) if games else 0.0
+    ranked = [(math.log(rank), ppg, g) for rank, ppg, g in samples if rank]
+    xs = {x for x, _, _ in ranked}
+    if len(xs) < 3:
+        return lambda rank: average
+    weight = sum(g for _, _, g in ranked)
+    mean_x = sum(x * g for x, _, g in ranked) / weight
+    mean_y = sum(y * g for _, y, g in ranked) / weight
+    sxx = sum(g * (x - mean_x) ** 2 for x, _, g in ranked)
+    slope = sum(g * (x - mean_x) * (y - mean_y) for x, y, g in ranked) / sxx
+    if slope >= 0:
+        return lambda rank: average
+    lo, hi = min(xs), max(xs)
+
+    def prior(rank: int | None) -> float:
+        x = min(hi, max(lo, math.log(rank))) if rank else hi
+        return max(0.0, mean_y + slope * (x - mean_x))
+
+    return prior
+
+
+def replacement_levels(
+    players: list[PlayerScore], roster_positions: list[str], num_teams: int
+) -> dict[str, float]:
+    """Position -> the projection any team can count on to fill a starting spot.
+
+    Every team's starting slots are filled from the league-wide pool, best
+    players first: fixed slots, then flex slots from the narrowest eligibility
+    out, so superflex slots take the QBs they really do in a two-QB league.
+    The best player left over at a position sets its replacement level; where
+    nobody is left over, its weakest starter does. Positions no slot can hold
+    are left out -- such a player is worth nothing in a trade.
+    """
+    counts: dict[str, int] = {}
+    for slot in roster_positions:
+        if slot not in NON_STARTING_SLOTS:
+            counts[slot] = counts.get(slot, 0) + 1
+    fixed = [s for s in counts if s not in FLEX_ELIGIBILITY]
+    flexes = sorted(
+        (s for s in counts if s in FLEX_ELIGIBILITY), key=lambda s: len(FLEX_ELIGIBILITY[s])
+    )
+
+    remaining = sorted(players, key=lambda p: -p.points)
+    starters: dict[str, list[float]] = {}
+    for slot in fixed + flexes:
+        eligible = FLEX_ELIGIBILITY.get(slot, {slot})
+        taken = [p for p in remaining if p.position in eligible][: counts[slot] * num_teams]
+        taken_ids = {id(p) for p in taken}
+        remaining = [p for p in remaining if id(p) not in taken_ids]
+        for p in taken:
+            starters.setdefault(p.position, []).append(p.points)
+
+    levels: dict[str, float] = {}
+    for pos in set(fixed).union(*(FLEX_ELIGIBILITY[s] for s in flexes)):
+        left = next((p.points for p in remaining if p.position == pos), None)
+        if left is None and pos in starters:
+            left = min(starters[pos])
+        if left is not None:
+            levels[pos] = left
+    return levels
+
+
+def team_strength(
+    players: dict[str, PlayerValue], rosters: dict[int, list[str]], roster_positions: list[str]
+) -> list[TeamStrengthRow]:
+    """Each team's best projected lineup, ranked overall and position by position.
+
+    Flex starters count at their own position, as in the weekly position
+    rankings; players on IR or the taxi squad can't start. Ties share a rank.
+    """
+    totals: dict[int, float] = {}
+    by_pos: dict[int, dict[str, float]] = {}
+    for rid, pids in rosters.items():
+        lineup = best_lineup(
+            [players[pid].player for pid in pids if players[pid].active], roster_positions, set()
+        )
+        points = dict.fromkeys(POSITIONS, 0.0)
+        for p in lineup:
+            if p.position in points:
+                points[p.position] += p.points
+        by_pos[rid] = {pos: round(pts, 2) for pos, pts in points.items()}
+        totals[rid] = round(sum(p.points for p in lineup), 2)
+
+    def share_ranks(values: dict[int, float]) -> dict[int, int]:
+        return {rid: 1 + sum(1 for v in values.values() if v > values[rid]) for rid in values}
+
+    total_ranks = share_ranks(totals)
+    pos_ranks = {pos: share_ranks({rid: by_pos[rid][pos] for rid in rosters}) for pos in POSITIONS}
+    rows = [
+        TeamStrengthRow(
+            roster_id=rid,
+            total=totals[rid],
+            rank=total_ranks[rid],
+            points=by_pos[rid],
+            ranks={pos: pos_ranks[pos][rid] for pos in POSITIONS},
+        )
+        for rid in rosters
+    ]
+    return sorted(rows, key=lambda r: (r.rank, r.roster_id))
+
+
+def build_trade_values(
+    weeks_raw_matchups: dict[int, list[dict]],
+    rosters: list[dict],
+    players_map: dict,
+    roster_positions: list[str],
+    weeks_left: int = 0,
+    trade_deadline: int | None = None,
+    prior_games: int = PRIOR_GAMES,
+) -> TradeValues:
+    """Rest-of-season trade values for every rostered player.
+
+        projection = (games * points per game + prior_games * prior) / (games + prior_games)
+
+    games counts the weeks he scored while on a roster -- Sleeper doesn't say
+    whether a player was active, so a 0 reads as a week he didn't play -- and
+    the prior is what his Sleeper ranking implies at his position (rank_prior).
+    Early in the season the ranking carries most of the weight; by November
+    his own scoring does. Value is the projection above his position's
+    replacement level, floored at 0: a player no better than a replacement
+    starter is worth nothing in a trade.
+    """
+    weekly = player_weekly_points(weeks_raw_matchups)
+    holder = {pid: r["roster_id"] for r in rosters for pid in r.get("players") or []}
+    sidelined = {pid for r in rosters for pid in (r.get("reserve") or []) + (r.get("taxi") or [])}
+
+    production: dict[str, tuple[PlayerScore, int, float, int | None]] = {}
+    for pid in sorted(set(weekly) | set(holder)):
+        played = [pts for pts in weekly.get(pid, {}).values() if pts]
+        ppg = sum(played) / len(played) if played else 0.0
+        rank = (players_map.get(pid) or {}).get("search_rank")
+        production[pid] = (_player_score(pid, 0.0, players_map), len(played), ppg, rank)
+
+    samples: dict[str, list[tuple[int | None, float, int]]] = {}
+    for player, games, ppg, rank in production.values():
+        if games:
+            samples.setdefault(player.position, []).append((rank, ppg, games))
+    priors = {pos: rank_prior(s) for pos, s in samples.items()}
+
+    expected: dict[str, float] = {}
+    for pid, (player, games, ppg, rank) in production.items():
+        prior = priors[player.position](rank) if player.position in priors else 0.0
+        expected[pid] = prior
+        weight = games + prior_games
+        player.points = round((games * ppg + prior_games * prior) / weight, 2) if weight else 0.0
+
+    pool = [production[pid][0] for pid in holder if pid not in sidelined]
+    levels = replacement_levels(pool, roster_positions, len(rosters))
+
+    values: dict[str, PlayerValue] = {}
+    for pid, (player, games, ppg, _rank) in production.items():
+        level = levels.get(player.position)
+        status = (players_map.get(pid) or {}).get("injury_status")
+        values[pid] = PlayerValue(
+            player=player,
+            roster_id=holder.get(pid),
+            games=games,
+            ppg=round(ppg, 2),
+            prior=round(expected[pid], 2),
+            value=round(max(0.0, player.points - level), 2) if level is not None else 0.0,
+            injury=INJURY_TAGS.get(status, status) if status else None,
+            active=pid not in sidelined,
+        )
+
+    by_roster: dict[int, list[str]] = {r["roster_id"]: [] for r in rosters}
+    for pid, rid in holder.items():
+        by_roster[rid].append(pid)
+    for pids in by_roster.values():
+        pids.sort(key=lambda pid: (-values[pid].value, -values[pid].projection, pid))
+
+    return TradeValues(
+        players=values,
+        replacement=levels,
+        rosters=by_roster,
+        strength=team_strength(values, by_roster, roster_positions),
+        prior_games=prior_games,
+        weeks_left=weeks_left,
+        roster_limit=sum(1 for s in roster_positions if s not in ("IR", "TAXI")),
+        trade_deadline=trade_deadline,
+    )
+
+
+def trade_verdict(gets: list[float]) -> tuple[str, int | None]:
+    """How lopsided a trade is, from the value each side receives.
+
+    Returns (verdict, index of the side ahead). The verdict is "even" when
+    nobody gets a player above replacement, "fair" when the gap is under
+    FAIR_TRADE_GAP or the first band, then "slight edge", "favors" and
+    "lopsided" as the gap grows against the bigger side's haul. The
+    calculator in app.js mirrors this.
+    """
+    order = sorted(range(len(gets)), key=lambda i: -gets[i])
+    if len(order) < 2 or gets[order[0]] < 0.005:
+        return "even", None
+    top, second = gets[order[0]], gets[order[1]]
+    gap = top - second
+    share = gap / top
+    fair, slight, favors = TRADE_VERDICT_BANDS
+    if gap < FAIR_TRADE_GAP or share < fair:
+        return "fair", None
+    if share < slight:
+        return "slight edge", order[0]
+    return ("favors" if share < favors else "lopsided"), order[0]
 
 
 # --- All-time rivalries ---

@@ -93,6 +93,35 @@ log for that week (waivers with the FAAB bid, free agent pickups, trades).
 Failed transactions (an outbid claim, a vetoed trade) never happened, so
 they're excluded.
 
+### Trade calculator and analyzer
+
+`trades.html` ("Trades" in the nav) has:
+
+- **Trade calculator** -- pick two teams, tap the players each sends, and
+  get a verdict (fair / slight edge / favors / lopsided), each team's best
+  projected lineup before and after with the exact lineup swaps, roster-limit
+  warnings, players that would even a one-sided deal, and a shareable link
+  (`trades.html#trade=<roster>:<players>/<roster>:<players>`). It runs in the
+  browser from `data.js`; the lineup and verdict logic mirror
+  `compute.best_lineup` and `compute.trade_verdict`.
+- **This season's trades** -- each trade graded on points scored since
+  (players' starts for their new team) and on the value of what each side
+  received, going forward.
+- **Projected lineups** -- every team's best projected lineup, ranked
+  overall and position by position, to spot who needs what.
+- **Player values** -- every rostered player, by position.
+
+A player's value is his projected points per week above a replacement-level
+starter at his position. The projection blends his scoring this season with
+what his Sleeper `search_rank` implies at his position (a fit over this
+league's own results), counting the ranking as `PRIOR_GAMES` (5) games of
+evidence. Replacement level comes from filling every team's starting slots
+(`roster_positions`, flex and superflex included) from the league-wide pool.
+Everything is Sleeper data only: no outside rankings or projections.
+Injuries aren't priced in (they're tagged) and draft picks aren't valued.
+The calculator appears for the current season once a week is complete; past
+seasons keep a history-only Trades page.
+
 ### Season recap ("Week N+1")
 
 Once the regular season is fully built, a recap page appears one week past

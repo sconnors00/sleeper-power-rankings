@@ -357,6 +357,43 @@ class PlayoffOddsRow:
 
 
 @dataclass
+class PlayerValue:
+    player: PlayerScore  # points = projected points per week
+    roster_id: int | None  # the fantasy team that has him now
+    games: int  # weeks he scored while on a roster this season
+    ppg: float  # his average over those games
+    prior: float  # points per game his Sleeper ranking implies
+    value: float  # projection above a replacement starter at his position, floored at 0
+    injury: str | None  # short tag: "Q", "D", "Out", "IR", ...
+    active: bool  # False while on IR or the taxi squad, so he can't start
+
+    @property
+    def projection(self) -> float:
+        return self.player.points
+
+
+@dataclass
+class TeamStrengthRow:
+    roster_id: int
+    total: float  # best lineup's projected points per week
+    rank: int
+    points: dict[str, float]  # position -> that lineup's projected points there
+    ranks: dict[str, int]  # position -> league rank, 1 = most; ties share a rank
+
+
+@dataclass
+class TradeValues:
+    players: dict[str, PlayerValue]  # every rostered or recently rostered player
+    replacement: dict[str, float]  # position -> replacement starter's projection
+    rosters: dict[int, list[str]]  # roster id -> player ids, most valuable first
+    strength: list[TeamStrengthRow]  # best projected lineup first
+    prior_games: int  # games of evidence the ranking-based prior is worth
+    weeks_left: int  # regular-season weeks still to play
+    roster_limit: int  # starters plus bench, IR and taxi aside
+    trade_deadline: int | None
+
+
+@dataclass
 class SeasonSummary:
     season: str
     league_name: str
@@ -380,3 +417,4 @@ class SeasonSummary:
     playoff_byes: int = 0
     remaining_weeks: int = 0  # regular-season weeks the odds simulate
     acquisitions: AcquisitionSummary | None = None
+    trade_values: TradeValues | None = None  # current season only
