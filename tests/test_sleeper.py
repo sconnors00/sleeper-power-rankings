@@ -92,3 +92,13 @@ def test_historical_transactions_still_served_from_cache(client, tmp_path):
     calls = _stub_fetch(client, [])
     assert client.get_transactions("L1", "2024", 1, completed=True) == cached
     assert not calls
+
+
+def test_nfl_schedule_is_fetched_once_and_cached(client, tmp_path):
+    games = [{"week": 1, "home": "KC", "away": "BAL"}]
+    calls = _stub_fetch(client, games)
+    assert client.get_nfl_schedule("2026") == games
+    assert calls == ["https://api.sleeper.com/schedule/nfl/regular/2026"]
+    assert client.get_nfl_schedule("2026") == games
+    assert len(calls) == 1
+    assert json.loads((tmp_path / "2026" / "raw" / "nfl_schedule.json").read_text()) == games

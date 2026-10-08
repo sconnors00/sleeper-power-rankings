@@ -115,9 +115,11 @@ budget.
 `trades.html` ("Trades" in the nav) has:
 
 - **Trade calculator** -- pick two teams, tap the players each sends, and
-  get a verdict (fair / slight edge / favors / lopsided), each team's best
-  projected lineup before and after with the exact lineup swaps, roster-limit
-  warnings, players that would even a one-sided deal, and a shareable link
+  get a verdict (fair / slight edge / favors / lopsided), a lineup-fit line,
+  each team's starting lineup before and after played out over every week
+  left (byes, injuries, the drop or waiver pickup the deal forces, playoff
+  weeks weighted by that team's playoff odds), the healthy-lineup swaps,
+  players that would even a one-sided deal, and a shareable link
   (`trades.html#trade=<roster>:<players>/<roster>:<players>`). It runs in the
   browser from `data.js`; the lineup and verdict logic mirror
   `compute.best_lineup` and `compute.trade_verdict`.
@@ -134,8 +136,14 @@ what his Sleeper `search_rank` implies at his position (a fit over this
 league's own results), counting the ranking as `PRIOR_GAMES` (5) games of
 evidence. Replacement level comes from filling every team's starting slots
 (`roster_positions`, flex and superflex included) from the league-wide pool.
+That surplus is scaled by the share of the weeks left, through the fantasy
+championship, that he's expected to play: byes come from Sleeper's NFL
+schedule (`api.sleeper.com/schedule/nfl/regular/<season>`, best-effort and
+cached), and `injury_status` costs him next week (Out, or a discount for
+Questionable/Doubtful) or the next four (IR, PUP). Playoff weeks count by
+the share of the league that makes the playoffs.
 Everything is Sleeper data only: no outside rankings or projections.
-Injuries aren't priced in (they're tagged) and draft picks aren't valued.
+Draft picks aren't valued.
 The calculator appears for the current season once a week is complete; past
 seasons keep a history-only Trades page.
 

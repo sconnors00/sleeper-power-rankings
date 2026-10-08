@@ -126,6 +126,9 @@
   <p>To find replacement level, every team's starting lineup is filled from all the league's rosters, best projections first: the regular slots, then the flex spots.{% if superflex %} Superflex spots mostly go to quarterbacks, which is why QBs are worth so much here.{% endif %} The best player left over at each position sets its replacement level. Players on IR or the taxi squad sit this out, since they can't start. A player's value is his projection minus that level, and never below 0, because a player who's no better than a replacement isn't worth anything in a trade.</p>
   <p>Right now replacement level is {% for pos, level in replacement_levels %}{{ pos }} {{ level | fmt2 }}{% if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %} points per week.</p>
 
+  <h3>Byes and injuries</h3>
+  <p>A player only helps in the weeks he plays, so his value is scaled by the share of the season's remaining weeks he's expected to play. A bye week still ahead is a week off. So is the next week for a player listed as Out or suspended, and the next {{ ir_weeks }} weeks, the shortest stint those lists allow, for one on injured reserve or PUP. A Questionable player counts as {{ "%.0f" | format(outlook.Questionable[0] * 100) }}% of next week and a Doubtful one as {{ "%.0f" | format(outlook.Doubtful[0] * 100) }}%. The weeks run through the fantasy championship. Each playoff week counts only by the share of the league that makes the playoffs{% if trade_values.weights and trade_values.playoff_from %} ({{ "%.0f" | format(trade_values.weights[-1] * 100) }}% here){% endif %}, the average team's chance of playing in it.</p>
+
   {% if trade_example %}
   {% set pv = trade_example.pv %}
   <h3>Worked example: {{ pv.player.name }}</h3>
@@ -137,7 +140,13 @@
       <tr><td>Expected from his rank</td><td>{{ pv.prior | fmt2 }}</td></tr>
       <tr><td>Projection</td><td>({{ pv.games }} &times; {{ pv.ppg | fmt2 }} + {{ prior_games }} &times; {{ pv.prior | fmt2 }}) &divide; {{ pv.games + prior_games }} = {{ pv.projection | fmt2 }}</td></tr>
       <tr><td>Replacement {{ pv.player.position }}</td><td>{{ trade_example.replacement | fmt2 }}</td></tr>
+      {% if trade_values.horizon %}
+      <tr><td>Above replacement</td><td>{{ pv.projection | fmt2 }} &minus; {{ trade_example.replacement | fmt2 }} = {{ pv.surplus | fmt2 }}</td></tr>
+      <tr><td>Weeks he's expected to play</td><td>{{ "%g" | format(pv.weeks_available) }} of {{ trade_values.horizon | length }}{% if trade_values.playoff_from %}, or {{ "%.1f%%" | format(trade_example.share * 100) }} once playoff weeks are weighted{% endif %}</td></tr>
+      <tr class="total-row"><td>Value</td><td>{{ pv.surplus | fmt2 }} &times; {{ "%.1f%%" | format(trade_example.share * 100) }} = {{ pv.value | fmt2 }}</td></tr>
+      {% else %}
       <tr class="total-row"><td>Value</td><td>{{ pv.value | fmt2 }}</td></tr>
+      {% endif %}
     </tbody>
   </table>
   </div>
@@ -145,7 +154,8 @@
 
   <h3>The verdict</h3>
   <p>The calculator adds up the value each team receives. A gap under {{ fair_gap | fmt2 }} points a week, or under {{ "%.0f" | format(verdict_bands[0] * 100) }}% of the bigger side, is a fair trade. Up to {{ "%.0f" | format(verdict_bands[1] * 100) }}% is a slight edge, up to {{ "%.0f" | format(verdict_bands[2] * 100) }}% favors one side, and anything more is lopsided. When one side is ahead, the calculator suggests players from that team's roster that would even it up.</p>
-  <p>Value isn't the whole story, so the calculator also rebuilds both teams' best lineups with and without the deal. Two good players for one great one can lose on value and still help, if one of the two would have sat on the bench anyway. It also warns when a team would have to drop someone to stay under the roster limit. Injuries aren't priced in (watch for the tags next to players' names), and draft picks can't be valued.</p>
+  <p>Value isn't the whole story, because a player is worth more to some teams than others. So the calculator also plays out every remaining week for both teams, with and without the deal, starting the best lineup each team has available that week. Two good players for one great one can lose on value and still help, if one of the two would have sat on the bench anyway. Depth counts too: a backup who covers a starter's bye week is worth something to his team.</p>
+  <p>Roster spots count as well. A team that takes on more players than it sends and goes over the roster limit drops whoever its lineup would miss least. A team that frees up roster spots fills each one from waivers with a player at replacement level, at whichever position helps its lineup most. Playoff weeks count by each team's own playoff odds, so a contender gets more out of a December stud than a team that's already out of it. The <em>lineup fit</em> line says whether the deal helps or hurts each team's lineup, ignoring changes under {{ fit_gap | fmt2 }} points a week. Draft picks can't be valued.</p>
 </section>
 {% endif %}
 

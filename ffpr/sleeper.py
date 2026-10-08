@@ -11,6 +11,9 @@ from typing import Any
 import httpx
 
 BASE_URL = "https://api.sleeper.app/v1"
+# Not part of the documented v1 API, but what Sleeper's own app reads the NFL
+# schedule from. Used only for bye weeks, so a failure costs nothing but those.
+NFL_SCHEDULE_URL = "https://api.sleeper.com/schedule/nfl/regular/{season}"
 PLAYERS_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
@@ -143,6 +146,13 @@ class SleeperClient:
         if completed:
             return self._fetch_cache_first(f"/draft/{draft_id}/picks", cache_file)
         return self._fetch_with_fallback_cache(f"/draft/{draft_id}/picks", cache_file)
+
+    def get_nfl_schedule(self, season: str) -> list[dict[str, Any]]:
+        """Every regular-season NFL game: [{"week": 1, "home": "KC", "away": "BAL", ...}]."""
+        cache_file = self._raw_dir(season) / "nfl_schedule.json"
+        return self._fetch_cache_first(
+            NFL_SCHEDULE_URL.format(season=season), cache_file, lambda data: bool(data)
+        )
 
     def get_players(self) -> dict[str, Any]:
         cache_file = self.data_dir / "players_nfl.json"

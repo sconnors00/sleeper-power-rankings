@@ -14,6 +14,8 @@ from ffpr.compute import (
     DEFAULT_WEIGHTS,
     FAIR_TRADE_GAP,
     FLEX_ELIGIBILITY,
+    INJURY_OUTLOOK,
+    LINEUP_FIT_GAP,
     PLAYOFF_SIMS,
     POSITIONS,
     PRIOR_GAMES,
@@ -203,7 +205,10 @@ def build_data_js(season: SeasonSummary) -> str:
 def _trade_payload(season: SeasonSummary) -> dict | None:
     """What the trade calculator needs: every rostered player's value and
     projection, who holds whom, and the rules it has to mirror (lineup slots,
-    flex eligibility, verdict bands) so the numbers can't drift from Python's."""
+    flex eligibility, verdict bands) so the numbers can't drift from Python's.
+    The weeks still to play come with each week's weight and each player's
+    expected share of it, so the lineup check can play the rest of the season
+    out week by week; playoff weeks count by each team's own playoff odds."""
     tv = season.trade_values
     if tv is None:
         return None
@@ -219,14 +224,22 @@ def _trade_payload(season: SeasonSummary) -> dict | None:
                 "value": pv.value,
                 "injury": pv.injury,
                 "active": pv.active,
+                "avail": pv.availability,
             }
+    odds = {row.roster_id: row.playoff_pct for row in season.playoff_odds}
     return {
         "rosterPositions": season.roster_positions,
         "flex": {slot: sorted(eligible) for slot, eligible in FLEX_ELIGIBILITY.items()},
         "rosterLimit": tv.roster_limit,
         "weeksLeft": tv.weeks_left,
         "fairGap": FAIR_TRADE_GAP,
+        "fitGap": LINEUP_FIT_GAP,
         "bands": list(TRADE_VERDICT_BANDS),
+        "horizon": tv.horizon,
+        "weights": tv.weights,
+        "playoffFrom": tv.playoff_from,
+        "playoffPct": {str(rid): pct for rid, pct in odds.items()},
+        "replacement": tv.replacement,
         "players": players,
         "rosters": {str(rid): pids for rid, pids in tv.rosters.items()},
     }
@@ -512,10 +525,13 @@ def _trade_example(season: SeasonSummary) -> dict | None:
     if not candidates:
         return None
     pv = max(candidates, key=lambda pv: (pv.value, pv.player.name))
+    played = sum(w * a for w, a in zip(tv.weights, pv.availability, strict=True))
     return {
         "pv": pv,
         "team": season.teams.get(pv.roster_id),
         "replacement": tv.replacement[pv.player.position],
+        # the weighted share of the weeks left he plays, which scales his surplus
+        "share": played / sum(tv.weights) if sum(tv.weights) else 1.0,
     }
 
 
@@ -559,6 +575,9 @@ def _how_it_works_context(season: SeasonSummary) -> dict:
         ),
         "fair_gap": FAIR_TRADE_GAP,
         "verdict_bands": TRADE_VERDICT_BANDS,
+        "fit_gap": LINEUP_FIT_GAP,
+        "outlook": INJURY_OUTLOOK,
+        "ir_weeks": len(INJURY_OUTLOOK["IR"]),
         "superflex": "SUPER_FLEX" in season.roster_positions,
         "replacement_levels": _replacement_in_order(season),
     }

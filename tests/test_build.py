@@ -502,7 +502,7 @@ def test_trade_deadline_note_once_it_has_passed(
 def test_data_js_carries_the_calculator_payload(
     rosters, users, matchups_week5, transactions_week5, players, league
 ):
-    from ffpr.compute import FAIR_TRADE_GAP, TRADE_VERDICT_BANDS
+    from ffpr.compute import FAIR_TRADE_GAP, LINEUP_FIT_GAP, TRADE_VERDICT_BANDS
 
     season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
     _with_trade_values(season, rosters, matchups_week5, transactions_week5, players, league)
@@ -520,6 +520,11 @@ def test_data_js_carries_the_calculator_payload(
             assert trade["players"][pid]["value"] == pv.value
             assert trade["players"][pid]["proj"] == pv.projection
             assert trade["players"][pid]["active"] == pv.active
+            assert trade["players"][pid]["avail"] == pv.availability
+    assert trade["fitGap"] == LINEUP_FIT_GAP
+    assert trade["replacement"] == season.trade_values.replacement
+    assert (trade["horizon"], trade["weights"], trade["playoffFrom"]) == ([], [], None)
+    assert trade["playoffPct"] == {}
 
     season.trade_values = None
     content = build_data_js(season)
@@ -558,6 +563,38 @@ def test_how_it_works_explains_trade_values(
     )
     assert f"Worked example: {escape(top.player.name)}" in section
     assert f"= {top.projection:.2f}" in section
+    assert "Byes and injuries" in section
+    assert "Weeks he's expected to play" not in section  # no weeks left to scale by
+
+
+def test_trade_values_show_availability_with_weeks_left(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    from ffpr.compute import build_trade_values
+
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    season.trade_values = build_trade_values(
+        {5: matchups_week5},
+        rosters,
+        players,
+        league["roster_positions"],
+        weeks_left=9,
+        horizon={6: 1.0, 7: 1.0, 15: 0.5},
+        playoff_from=15,
+        byes={team: {7} for team in {p.get("team") for p in players.values()} if team},
+    )
+    out = tmp_path / "site"
+    render_site(season, out)
+    values = (out / "trades.html").read_text().split('id="values"')[1].split("</section>")[0]
+    assert "<th>Avail.</th>" in values and "of the 3 weeks left, playoffs included," in values
+
+    section = (out / "how-it-works.html").read_text().split('id="trade-values"')[1]
+    top = max(
+        (pv for pv in season.trade_values.players.values() if pv.roster_id and pv.games),
+        key=lambda pv: pv.value,
+    )
+    share = (sum(w * a for w, a in zip([1.0, 1.0, 0.5], top.availability, strict=True)) / 2.5) * 100
+    assert f"{top.surplus:.2f} &times; {share:.1f}% = {top.value:.2f}" in section
     assert "10%" in section and "25%" in section and "50%" in section
 
 

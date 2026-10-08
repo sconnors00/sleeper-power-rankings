@@ -7,7 +7,7 @@
 {% if values %}
 <section id="calculator">
   <h2>Trade calculator</h2>
-  <p class="note">Pick two teams and tap the players each one sends. A player's value is how many more points a week he's projected to score than a replacement-level starter at his position. The verdict compares the value each team gets, and the lineup check shows what the deal does to each team's best starting lineup. <a href="how-it-works.html#trade-values">How this works</a></p>
+  <p class="note">Pick two teams and tap the players each one sends. A player's value is how many more points a week he's projected to score than a replacement-level starter at his position, over the rest of the season: bye weeks still ahead and injuries count against it. The verdict compares the value each team gets. The lineup check plays out each remaining week with and without the deal, including who a team would have to drop or could pick up, to show what it does to each team's starting lineup. <a href="how-it-works.html#trade-values">How this works</a></p>
   {% if trade_deadline %}
   <p class="note">{% if deadline_passed %}The trade deadline (Week {{ trade_deadline }}) has passed, so this is for what-ifs only.{% else %}Trade deadline: Week {{ trade_deadline }}.{% endif %}</p>
   {% endif %}
@@ -89,13 +89,13 @@
 
 <section id="values">
   <h2>Player values</h2>
-  <p class="note">Every rostered player by position. <em>Scored</em> is his average in the games he's played this season; <em>Proj.</em> blends that with what his Sleeper ranking implies; <em>Value</em> is the projection above the position's replacement level. Tap a position to open it.</p>
+  <p class="note">Every rostered player by position. <em>Scored</em> is his average in the games he's played this season; <em>Proj.</em> blends that with what his Sleeper ranking implies; {% if values.horizon %}<em>Avail.</em> is how many of the {{ values.horizon | length }} weeks left{% if values.playoff_from %}, playoffs included,{% endif %} he's expected to play, after byes and injuries; <em>Value</em> is the projection above the position's replacement level, scaled by that.{% else %}<em>Value</em> is the projection above the position's replacement level.{% endif %} Tap a position to open it.</p>
   {% for group in value_board %}
   <details class="fold">
     <summary>{{ group.position }} <span class="note-inline">replacement level {{ group.replacement | fmt2 }}</span></summary>
     <div class="table-scroll">
     <table class="data-table">
-      <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Scored</th><th>Proj.</th><th>Value</th></tr></thead>
+      <thead><tr><th>#</th><th>Player</th><th>Team</th><th>Scored</th><th>Proj.</th>{% if values.horizon %}<th>Avail.</th>{% endif %}<th>Value</th></tr></thead>
       <tbody>
         {% for pv in group.rows %}
         <tr>
@@ -104,6 +104,7 @@
           <td class="team-cell"><span class="team-swatch" style="background:{{ teams[pv.roster_id].color }}"></span>{{ teams[pv.roster_id].name }}</td>
           <td>{% if pv.games %}{{ pv.ppg | fmt2 }} <span class="note-inline">in {{ pv.games }}</span>{% else %}&mdash;{% endif %}</td>
           <td>{{ pv.projection | fmt2 }}</td>
+          {% if values.horizon %}<td>{{ "%g" | format(pv.weeks_available) }}</td>{% endif %}
           <td><strong>{{ pv.value | fmt2 }}</strong></td>
         </tr>
         {% endfor %}

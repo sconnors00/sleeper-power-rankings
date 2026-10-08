@@ -1135,6 +1135,25 @@ def playoff_byes(playoff_teams: int) -> int:
     return size - playoff_teams
 
 
+NFL_LAST_WEEK = 18
+
+
+def playoff_weeks(settings: dict) -> list[int]:
+    """The weeks the fantasy playoffs are played, from Sleeper's league settings.
+
+    playoff_round_type 0 plays a round a week, 1 makes the championship a
+    two-week round, 2 makes every round two weeks.
+    """
+    teams = settings.get("playoff_teams") or 0
+    start = settings.get("playoff_week_start") or 0
+    if teams < 2 or not start:
+        return []
+    rounds = (teams + playoff_byes(teams)).bit_length() - 1
+    round_type = settings.get("playoff_round_type")
+    weeks = {1: rounds + 1, 2: 2 * rounds}.get(round_type, rounds)
+    return list(range(start, min(start + weeks, NFL_LAST_WEEK + 1)))
+
+
 def seed_playoffs(
     wins: dict[int, float],
     points_for: dict[int, float],
@@ -1349,10 +1368,57 @@ def grade_acquisitions(
 
 PRIOR_GAMES = 5  # games of evidence the ranking-based expectation is worth
 FAIR_TRADE_GAP = 1.0  # a value gap under this many points per week always reads as fair
+# A lineup change smaller than this many points per week reads as no change
+# in the calculator's lineup check.
+LINEUP_FIT_GAP = 0.5
 # Value gap as a share of the bigger side: under the first is fair, then a
 # slight edge, then favors; past the last it's lopsided.
 TRADE_VERDICT_BANDS = (0.10, 0.25, 0.50)
 INJURY_TAGS = {"Questionable": "Q", "Doubtful": "D"}
+# How much of each coming week a player is expected to play, by Sleeper's
+# injury_status: Q and D are discounted for next week, Out misses it, and IR
+# and PUP miss the four games those lists last at minimum. Weeks past the
+# list are full weeks.
+INJURY_OUTLOOK: dict[str, tuple[float, ...]] = {
+    "Questionable": (0.75,),
+    "Doubtful": (0.25,),
+    "Out": (0.0,),
+    "Sus": (0.0,),
+    "IR": (0.0,) * 4,
+    "PUP": (0.0,) * 4,
+}
+
+
+def nfl_byes(schedule: list[dict]) -> dict[str, set[int]]:
+    """NFL team -> the weeks it has no game, from Sleeper's NFL schedule."""
+    played: dict[str, set[int]] = {}
+    for game in schedule if isinstance(schedule, list) else []:
+        if not isinstance(game, dict):
+            continue
+        week = game.get("week")
+        if not isinstance(week, int):
+            continue
+        for side in ("home", "away"):
+            if game.get(side):
+                played.setdefault(game[side], set()).add(week)
+    if not played:
+        return {}
+    weeks = set().union(*played.values())
+    return {team: weeks - games for team, games in played.items()}
+
+
+def availability(
+    status: str | None, nfl_team: str | None, horizon: list[int], byes: dict[str, set[int]]
+) -> list[float]:
+    """The share of each horizon week a player is expected to play: 0 on his
+    bye, discounted or 0 for the weeks his injury status covers, else 1.
+    horizon starts with the next week to be played."""
+    outlook = INJURY_OUTLOOK.get(status or "", ())
+    off = byes.get(nfl_team or "", set())
+    return [
+        0.0 if week in off else (outlook[i] if i < len(outlook) else 1.0)
+        for i, week in enumerate(horizon)
+    ]
 
 
 def player_weekly_points(weeks_raw_matchups: dict[int, list[dict]]) -> dict[str, dict[int, float]]:
@@ -1487,6 +1553,9 @@ def build_trade_values(
     weeks_left: int = 0,
     trade_deadline: int | None = None,
     prior_games: int = PRIOR_GAMES,
+    horizon: dict[int, float] | None = None,
+    playoff_from: int | None = None,
+    byes: dict[str, set[int]] | None = None,
 ) -> TradeValues:
     """Rest-of-season trade values for every rostered player.
 
@@ -1496,9 +1565,15 @@ def build_trade_values(
     whether a player was active, so a 0 reads as a week he didn't play -- and
     the prior is what his Sleeper ranking implies at his position (rank_prior).
     Early in the season the ranking carries most of the weight; by November
-    his own scoring does. Value is the projection above his position's
+    his own scoring does. His surplus is the projection above his position's
     replacement level, floored at 0: a player no better than a replacement
     starter is worth nothing in a trade.
+
+    horizon maps each week still to be played, in order, to its weight:
+    regular-season weeks count fully, playoff weeks (from playoff_from on)
+    by the share of teams that play in them. Value is the surplus times the
+    weighted share of those weeks he's expected to play (availability), so
+    byes still ahead and injuries cost him; without a horizon it's the surplus.
     """
     weekly = player_weekly_points(weeks_raw_matchups)
     holder = {pid: r["roster_id"] for r in rosters for pid in r.get("players") or []}
@@ -1527,19 +1602,27 @@ def build_trade_values(
     pool = [production[pid][0] for pid in holder if pid not in sidelined]
     levels = replacement_levels(pool, roster_positions, len(rosters))
 
+    weeks = list(horizon or {})
+    weights = [horizon[w] for w in weeks] if horizon else []
     values: dict[str, PlayerValue] = {}
     for pid, (player, games, ppg, _rank) in production.items():
         level = levels.get(player.position)
         status = (players_map.get(pid) or {}).get("injury_status")
+        surplus = max(0.0, player.points - level) if level is not None else 0.0
+        avail = availability(status, player.nfl_team, weeks, byes or {})
+        played = sum(w * a for w, a in zip(weights, avail, strict=True))
+        share = played / sum(weights) if sum(weights) else 1.0
         values[pid] = PlayerValue(
             player=player,
             roster_id=holder.get(pid),
             games=games,
             ppg=round(ppg, 2),
             prior=round(expected[pid], 2),
-            value=round(max(0.0, player.points - level), 2) if level is not None else 0.0,
+            value=round(surplus * share, 2),
             injury=INJURY_TAGS.get(status, status) if status else None,
             active=pid not in sidelined,
+            surplus=round(surplus, 2),
+            availability=avail,
         )
 
     by_roster: dict[int, list[str]] = {r["roster_id"]: [] for r in rosters}
@@ -1557,6 +1640,9 @@ def build_trade_values(
         weeks_left=weeks_left,
         roster_limit=sum(1 for s in roster_positions if s not in ("IR", "TAXI")),
         trade_deadline=trade_deadline,
+        horizon=weeks,
+        weights=weights,
+        playoff_from=playoff_from,
     )
 
 

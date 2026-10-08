@@ -880,6 +880,88 @@ def test_build_trade_values_blends_scoring_with_rank():
     assert (tv.roster_limit, tv.weeks_left) == (2, 3)
 
 
+def test_playoff_weeks_follow_the_bracket():
+    from ffpr.compute import playoff_weeks
+
+    six = {"playoff_teams": 6, "playoff_week_start": 15}
+    assert playoff_weeks({**six, "playoff_round_type": 0}) == [15, 16, 17]
+    assert playoff_weeks({**six, "playoff_round_type": 1}) == [15, 16, 17, 18]
+    assert playoff_weeks({**six, "playoff_round_type": 2}) == [15, 16, 17, 18]  # NFL ends
+    assert playoff_weeks({"playoff_teams": 4, "playoff_week_start": 15}) == [15, 16]
+    assert playoff_weeks({"playoff_teams": 0, "playoff_week_start": 15}) == []
+
+
+def test_nfl_byes_are_the_weeks_without_a_game():
+    from ffpr.compute import nfl_byes
+
+    schedule = [
+        {"week": 1, "home": "KC", "away": "BAL"},
+        {"week": 1, "home": "BUF", "away": "NYJ"},
+        {"week": 2, "home": "KC", "away": "BUF"},
+        {"week": 3, "home": "BAL", "away": "NYJ"},
+        {"week": None, "home": "KC", "away": "NYJ"},
+    ]
+    assert nfl_byes(schedule) == {"KC": {3}, "BAL": {2}, "BUF": {3}, "NYJ": {2}}
+    assert nfl_byes([]) == {}
+    assert nfl_byes({"error": "not found"}) == {}  # an unexpected response means no byes
+
+
+def test_availability_counts_byes_and_injuries():
+    from ffpr.compute import availability
+
+    byes = {"KC": {8}}
+    assert availability(None, "KC", [6, 7, 8, 9], byes) == [1.0, 1.0, 0.0, 1.0]
+    assert availability("Questionable", "KC", [6, 7, 8], byes) == [0.75, 1.0, 0.0]
+    assert availability("Out", "BAL", [6, 7], byes) == [0.0, 1.0]
+    assert availability("IR", None, [6, 7, 8, 9, 10], byes) == [0.0, 0.0, 0.0, 0.0, 1.0]
+    assert availability("NA", "BAL", [6], {}) == [1.0]
+
+
+def test_trade_values_scale_by_the_weeks_a_player_plays():
+    from ffpr.compute import build_trade_values
+
+    raw = {1: [{"roster_id": 1, "players_points": {"a": 20.0, "b": 20.0, "c": 5.0}}]}
+    players_map = {
+        "a": {"full_name": "a", "position": "WR", "team": "KC"},
+        "b": {"full_name": "b", "position": "WR", "team": "BAL", "injury_status": "Out"},
+        "c": {"full_name": "c", "position": "WR", "team": "BAL"},
+    }
+    rosters = [{"roster_id": 1, "players": ["a", "b", "c"]}]
+    # Two regular-season weeks, then a playoff week worth half.
+    horizon = {2: 1.0, 3: 1.0, 4: 0.5}
+    tv = build_trade_values(
+        raw,
+        rosters,
+        players_map,
+        ["WR", "WR", "BN"],
+        horizon=horizon,
+        playoff_from=4,
+        byes={"KC": {3}},
+    )
+    a, b = tv.players["a"], tv.players["b"]
+    assert a.surplus == b.surplus > 0
+    assert a.availability == [1.0, 0.0, 1.0] and a.weeks_available == 2.0
+    assert b.availability == [0.0, 1.0, 1.0]
+    assert a.value == b.value == round(a.surplus * 1.5 / 2.5, 2)
+    assert (tv.horizon, tv.weights, tv.playoff_from) == ([2, 3, 4], [1.0, 1.0, 0.5], 4)
+
+    healthy = build_trade_values(raw, rosters, players_map, ["WR", "WR", "BN"])
+    assert healthy.players["a"].value == healthy.players["a"].surplus
+    assert healthy.horizon == []
+
+
+def test_trade_horizon_runs_through_the_championship():
+    from ffpr.cli import _trade_horizon
+
+    settings = {"playoff_teams": 6, "playoff_week_start": 15, "playoff_round_type": 0}
+    horizon, playoff_from = _trade_horizon(settings, 12, through_week=12, current_week=13)
+    assert horizon == {13: 1.0, 14: 1.0, 15: 0.5, 16: 0.5, 17: 0.5}
+    assert playoff_from == 15
+    horizon, playoff_from = _trade_horizon(settings, 12, through_week=14, current_week=17)
+    assert horizon == {17: 0.5}
+    assert playoff_from is None
+
+
 def test_build_trade_values_on_a_real_week(rosters, matchups_week5, players, league):
     from ffpr.compute import build_trade_values
 

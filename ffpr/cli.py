@@ -28,7 +28,9 @@ from ffpr.compute import (
     build_week_summaries,
     grade_acquisitions,
     grade_draft,
+    nfl_byes,
     playoff_byes,
+    playoff_weeks,
     schedule_pairs,
     simulate_playoff_odds,
 )
@@ -154,6 +156,32 @@ def _build_preseason(
         prev_rosters,
         champion_roster_id,
     )
+
+
+def _trade_horizon(
+    settings: dict, num_teams: int, through_week: int, current_week: int
+) -> tuple[dict[int, float], int | None]:
+    """The weeks trade values look ahead to, each with its weight, and the
+    first playoff week among them. Regular-season weeks count fully; a playoff
+    week counts by the share of the league that plays in it, so the average
+    team's chance of being there."""
+    playoffs = playoff_weeks(settings)
+    start = settings["playoff_week_start"]
+    last = playoffs[-1] if playoffs else start - 1
+    share = min(1.0, (settings.get("playoff_teams") or 0) / num_teams) if num_teams else 0.0
+    horizon = {
+        week: share if week >= start else 1.0
+        for week in range(max(through_week + 1, current_week), last + 1)
+    }
+    return horizon, (start if playoffs and start in horizon else None)
+
+
+def _nfl_byes(client: SleeperClient, season: str) -> dict[str, set[int]]:
+    """Best-effort: without the NFL schedule, values just don't account for byes."""
+    try:
+        return nfl_byes(client.get_nfl_schedule(season))
+    except (SleeperError, httpx.HTTPError, ValueError):
+        return {}
 
 
 def _playoff_odds(
@@ -315,7 +343,9 @@ def _build_season_summary(
     # Trade values look forward, so only the season still being played gets them.
     trade_values = None
     if is_current_season and week_summaries:
-        deadline = league_obj["settings"].get("trade_deadline") or 0
+        settings = league_obj["settings"]
+        deadline = settings.get("trade_deadline") or 0
+        horizon, playoff_from = _trade_horizon(settings, len(rosters), through_week, state["week"])
         trade_values = build_trade_values(
             weeks_raw,
             rosters,
@@ -323,6 +353,9 @@ def _build_season_summary(
             league_obj["roster_positions"],
             weeks_left=max(0, playoff_week_start - 1 - through_week),
             trade_deadline=deadline if 0 < deadline < playoff_week_start else None,
+            horizon=horizon,
+            playoff_from=playoff_from,
+            byes=_nfl_byes(client, season),
         )
 
     return SeasonSummary(

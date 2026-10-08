@@ -363,9 +363,15 @@ class PlayerValue:
     games: int  # weeks he scored while on a roster this season
     ppg: float  # his average over those games
     prior: float  # points per game his Sleeper ranking implies
-    value: float  # projection above a replacement starter at his position, floored at 0
+    value: float  # surplus, scaled by the share of the weeks left he's expected to play
     injury: str | None  # short tag: "Q", "D", "Out", "IR", ...
     active: bool  # False while on IR or the taxi squad, so he can't start
+    surplus: float = 0.0  # projection above a replacement starter at his position, floored at 0
+    availability: list[float] = field(default_factory=list)  # share of each horizon week he plays
+
+    @property
+    def weeks_available(self) -> float:
+        return sum(self.availability)
 
     @property
     def projection(self) -> float:
@@ -391,6 +397,9 @@ class TradeValues:
     weeks_left: int  # regular-season weeks still to play
     roster_limit: int  # starters plus bench, IR and taxi aside
     trade_deadline: int | None
+    horizon: list[int] = field(default_factory=list)  # weeks still to play, playoffs included
+    weights: list[float] = field(default_factory=list)  # each horizon week's weight in value
+    playoff_from: int | None = None  # first playoff week, if the horizon reaches it
 
 
 @dataclass

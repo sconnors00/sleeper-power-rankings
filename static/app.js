@@ -391,9 +391,10 @@
 })();
 
 // Trade calculator (trades.html). Kept apart from the charts so it works even
-// when the Chart.js CDN doesn't load. Player values, projections and the
-// verdict bands come from data.js; the lineup and verdict logic mirror
-// compute.best_lineup and compute.trade_verdict.
+// when the Chart.js CDN doesn't load. Player values, projections, each
+// player's availability week by week and the verdict bands come from
+// data.js; the lineup and verdict logic mirror compute.best_lineup and
+// compute.trade_verdict.
 (function () {
   "use strict";
   var DATA = window.FFPR;
@@ -402,6 +403,7 @@
 
   var T = DATA.trade;
   var PLAYERS = T.players;
+  var HORIZON = T.horizon || [];
   var POS_ORDER = ["QB", "RB", "WR", "TE", "K", "DEF"];
   var NON_STARTING = { BN: true, IR: true, TAXI: true };
   var SLOTS = T.rosterPositions.filter(function (s) { return !NON_STARTING[s]; });
@@ -459,16 +461,20 @@
   }
   function describe(pid) {
     var p = PLAYERS[pid];
+    if (p.waiver) return "a waiver " + p.pos + " (" + fmt(p.proj) + ")";
     return p.name + " (" + p.pos + ", " + fmt(p.proj) + ")";
   }
 
-  // The highest-projected legal lineup from these players, as in
+  // The highest-scoring legal lineup from these players, as in
   // compute.best_lineup: fixed slots take the best player left at their
-  // position, then flex slots are searched exhaustively. On equal points the
-  // players in `keep` stay in, so a tie never reads as a lineup change.
-  function bestLineup(pids, keep) {
+  // position, then flex slots are searched exhaustively. Players score their
+  // projection unless `pts` says otherwise (one week's expected points). On
+  // equal points the players in `keep` stay in, so a tie never reads as a
+  // lineup change.
+  function bestLineup(pids, keep, pts) {
+    pts = pts || function (pid) { return PLAYERS[pid].proj; };
     var remaining = pids.filter(isActive).sort(function (a, b) {
-      var diff = PLAYERS[b].proj - PLAYERS[a].proj;
+      var diff = pts(b) - pts(a);
       return diff || (keep[b] ? 1 : 0) - (keep[a] ? 1 : 0);
     });
     var lineup = [];
@@ -493,7 +499,7 @@
     var picked = [];
     function search(i) {
       if (i === FLEXES.length) {
-        var points = Math.round(total(picked, "proj") * 100) / 100;
+        var points = Math.round(sum(picked, pts) * 100) / 100;
         var kept = picked.filter(function (pid) { return keep[pid]; }).length;
         if (points > best.points || (points === best.points && kept > best.kept)) {
           best = { points: points, kept: kept, picks: picked.slice() };
@@ -512,6 +518,102 @@
     }
     search(0);
     return lineup.concat(best.picks);
+  }
+
+  function sum(pids, pts) {
+    return pids.reduce(function (acc, pid) { return acc + pts(pid); }, 0);
+  }
+
+  // Each remaining week's weight for this team: regular-season weeks count
+  // fully, playoff weeks by the team's playoff odds (or the league-wide share
+  // of teams that make it, without odds).
+  function weekWeights(rid) {
+    var pct = T.playoffPct[rid];
+    return HORIZON.map(function (week, k) {
+      var playoff = T.playoffFrom != null && week >= T.playoffFrom;
+      return playoff && pct != null ? pct : T.weights[k];
+    });
+  }
+
+  // Expected starting-lineup points per week over the rest of the season:
+  // the best lineup is rebuilt every week from who's available (byes,
+  // injuries), and the weeks are averaged by their weights. With no weeks
+  // left to play it's just the healthy lineup.
+  function seasonPoints(pids, weights) {
+    if (!HORIZON.length) return sum(bestLineup(pids, {}), function (pid) { return PLAYERS[pid].proj; });
+    var total = 0;
+    var weight = 0;
+    weights.forEach(function (w, k) {
+      if (!w) return;
+      var pts = function (pid) {
+        var avail = PLAYERS[pid].avail;
+        return PLAYERS[pid].proj * (avail && avail[k] != null ? avail[k] : 1);
+      };
+      total += w * sum(bestLineup(pids, {}, pts), pts);
+      weight += w;
+    });
+    return weight ? total / weight : 0;
+  }
+
+  // A stand-in for the best player on waivers: a full-time player at the
+  // position's replacement level.
+  function waiverPlayer(pos, n) {
+    var pid = "waiver:" + pos + ":" + n;
+    PLAYERS[pid] = PLAYERS[pid] || {
+      name: "Waiver pickup", pos: pos, nfl: null, proj: T.replacement[pos], value: 0,
+      injury: null, active: true, avail: null, waiver: true,
+    };
+    return pid;
+  }
+
+  // The roster a team would really field after the trade. Over the roster
+  // limit, it drops whoever its lineup misses least, one at a time; with spots
+  // the trade opened, it fills each from waivers at whichever position helps
+  // its lineup most.
+  function settle(before, after, weights) {
+    var activeBefore = before.filter(isActive).length;
+    var activeAfter = after.filter(isActive).length;
+    var mustDrop = Math.max(0, activeAfter - Math.max(T.rosterLimit, activeBefore));
+    var open = Math.max(0, Math.min(activeBefore, T.rosterLimit) - activeAfter);
+    var pids = after.slice();
+    var dropped = [];
+    var added = [];
+    for (var d = 0; d < mustDrop; d++) {
+      var cut = null;
+      var keepPoints = -Infinity;
+      pids.filter(isActive).forEach(function (pid) {
+        var points = seasonPoints(pids.filter(function (x) { return x !== pid; }), weights);
+        var better = points > keepPoints + 0.005 ||
+          (Math.abs(points - keepPoints) <= 0.005 && PLAYERS[pid].value < PLAYERS[cut].value);
+        if (better) {
+          cut = pid;
+          keepPoints = points;
+        }
+      });
+      pids.splice(pids.indexOf(cut), 1);
+      dropped.push(cut);
+    }
+    var startable = Object.keys(T.replacement).filter(function (pos) {
+      return SLOTS.some(function (s) { return s === pos || (T.flex[s] || []).indexOf(pos) >= 0; });
+    });
+    var current = open ? seasonPoints(pids, weights) : 0;
+    for (var a = 0; a < open; a++) {
+      var pick = null;
+      var pickPoints = current + 0.005;
+      startable.forEach(function (pos) {
+        var pid = waiverPlayer(pos, a);
+        var points = seasonPoints(pids.concat([pid]), weights);
+        if (points > pickPoints) {
+          pick = pid;
+          pickPoints = points;
+        }
+      });
+      if (!pick) break;
+      pids.push(pick);
+      added.push(pick);
+      current = pickPoints;
+    }
+    return { pids: pids, dropped: dropped, added: added };
   }
 
   // Who joins the lineup in place of whom, like compute.pair_swaps:
@@ -551,25 +653,30 @@
     var sends = [sides[0].picked, sides[1].picked];
     var gets = [total(sends[1], "value"), total(sends[0], "value")];
     var teams = [0, 1].map(function (i) {
+      var rid = sides[i].select.value;
+      var weights = weekWeights(rid);
       var before = rosterOf(i);
-      var after = before.filter(function (pid) { return sends[i].indexOf(pid) < 0; }).concat(sends[1 - i]);
+      var traded = before.filter(function (pid) { return sends[i].indexOf(pid) < 0; }).concat(sends[1 - i]);
+      var settled = settle(before, traded, weights);
+      var after = settled.pids;
       var lineupBefore = bestLineup(before, {});
       var keep = {};
       lineupBefore.forEach(function (pid) { keep[pid] = true; });
       var lineupAfter = bestLineup(after, keep);
-      var activeBefore = before.filter(isActive).length;
-      var activeAfter = after.filter(isActive).length;
       return {
-        rid: sides[i].select.value,
+        rid: rid,
         gets: gets[i],
         gives: gets[1 - i],
-        before: total(lineupBefore, "proj"),
-        after: total(lineupAfter, "proj"),
+        before: seasonPoints(before, weights),
+        after: seasonPoints(after, weights),
+        weight: weights.reduce(function (acc, w) { return acc + w; }, 0),
+        playoffPct: T.playoffPct[rid],
         swaps: pairSwaps(
           lineupAfter.filter(function (pid) { return lineupBefore.indexOf(pid) < 0; }),
           lineupBefore.filter(function (pid) { return lineupAfter.indexOf(pid) < 0; })
         ),
-        mustDrop: Math.max(0, activeAfter - Math.max(T.rosterLimit, activeBefore)),
+        dropped: settled.dropped,
+        added: settled.added,
       };
     });
     return { gets: gets, teams: teams, verdict: verdict(gets) };
@@ -584,6 +691,36 @@
     return "Lopsided for " + name;
   }
 
+  // What the deal does to each team's lineup, in words: a change under
+  // T.fitGap points a week doesn't count.
+  function fitLine(teams) {
+    var moves = teams.map(function (t) {
+      var d = t.after - t.before;
+      return d >= T.fitGap ? "helps" : d <= -T.fitGap ? "hurts" : null;
+    });
+    if (!moves[0] && !moves[1]) return "Barely changes either lineup";
+    if (moves[0] === moves[1]) return (moves[0] === "helps" ? "Helps" : "Hurts") + " both lineups";
+    var parts = [0, 1].filter(function (i) { return moves[i]; }).map(function (i) {
+      var name = teamName(teams[i].rid);
+      return moves[i] + " " + name + (/s$/i.test(name) ? "'" : "'s") + " lineup";
+    });
+    var text = parts.join(", ");
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function horizonNote(t, delta) {
+    var regular = T.weeksLeft > 0
+      ? "the " + T.weeksLeft + " regular-season week" + (T.weeksLeft === 1 ? "" : "s") + " left"
+      : null;
+    var playoffs = T.playoffFrom != null
+      ? "the playoffs" + (t.playoffPct != null
+        ? ", which count by this team's " + Math.round(t.playoffPct * 100) + "% playoff odds"
+        : "")
+      : null;
+    var span = [regular, playoffs].filter(Boolean).join(" and ");
+    return "About " + signed(delta * t.weight) + " points over " + span + ".";
+  }
+
   function teamCard(t) {
     var delta = t.after - t.before;
     var card = h("div", "award-card", [
@@ -593,30 +730,34 @@
         h("span", trend(t.gets - t.gives), [signed(t.gets - t.gives)]),
       ]),
       h("p", "trade-line", [
-        "Best lineup " + fmt(t.before) + " → " + fmt(t.after) + " pts/wk ",
+        (HORIZON.length ? "Lineup, rest of season " : "Best lineup ") +
+          fmt(t.before) + " → " + fmt(t.after) + " pts/wk ",
         h("strong", trend(delta), [signed(delta)]),
       ]),
     ]);
-    if (T.weeksLeft > 0 && Math.abs(delta) >= 0.005) {
-      card.appendChild(h("p", "note trade-line", [
-        "About " + signed(delta * T.weeksLeft) + " points over the " + T.weeksLeft +
-          " regular-season week" + (T.weeksLeft === 1 ? "" : "s") + " left.",
-      ]));
+    if (HORIZON.length && t.weight > 0 && Math.abs(delta) >= 0.005) {
+      card.appendChild(h("p", "note trade-line", [horizonNote(t, delta)]));
     }
+    t.dropped.forEach(function (pid) {
+      card.appendChild(h("p", "trade-line down", [
+        "Drops " + describe(pid) + ", the player its lineup misses least, to stay under the " +
+          T.rosterLimit + "-player roster limit.",
+      ]));
+    });
+    t.added.forEach(function (pid) {
+      card.appendChild(h("p", "trade-line", [
+        "Fills the open roster spot with " + describe(pid) + ", a replacement-level pickup.",
+      ]));
+    });
     if (t.swaps.length) {
+      card.appendChild(h("p", "note trade-line", ["Healthy lineup:"]));
       card.appendChild(h("ul", "trade-changes", t.swaps.map(function (pair) {
         if (pair[0] && pair[1]) return h("li", null, [describe(pair[0]) + " replaces " + describe(pair[1])]);
         if (pair[0]) return h("li", null, [describe(pair[0]) + " fills an empty slot"]);
         return h("li", "down", [describe(pair[1]) + " leaves a slot nobody can fill"]);
       })));
     } else {
-      card.appendChild(h("p", "note trade-line", ["Starting lineup unchanged."]));
-    }
-    if (t.mustDrop) {
-      card.appendChild(h("p", "trade-line down", [
-        "Would have to drop " + t.mustDrop + " player" + (t.mustDrop === 1 ? "" : "s") +
-          " to stay under the " + T.rosterLimit + "-player roster limit.",
-      ]));
+      card.appendChild(h("p", "note trade-line", ["Healthy starting lineup unchanged."]));
     }
     return card;
   }
@@ -659,12 +800,14 @@
     var detail = a.verdict.key === "even"
       ? "Neither side gets a player projected above replacement level."
       : teamName(a.teams[0].rid) + " gets " + fmt(a.gets[0]) + " in value, " +
-        teamName(a.teams[1].rid) + " gets " + fmt(a.gets[1]) + " (points per week above replacement).";
+        teamName(a.teams[1].rid) + " gets " + fmt(a.gets[1]) +
+        " (points per week above replacement, rest of season).";
     result.appendChild(h("div", "award-card trade-verdict", [
       h("h3", null, ["Verdict"]),
       h("p", "award-value", [headline(a.verdict)]),
       h("p", "award-teams", [detail]),
       bar,
+      h("p", "trade-line", [h("strong", null, ["Lineup fit: "]), fitLine(a.teams)]),
     ]));
     result.appendChild(h("div", "trade-teams", a.teams.map(teamCard)));
     var hint = suggestions(a);
