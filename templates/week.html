@@ -1,79 +1,37 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% set active_page = "latest" if is_index else "week" %}
+{% set current_week = week.week %}
 {% block title %}Week {{ week.week }} &middot; {{ league_name }}{% endblock %}
 {% block content %}
 
-<h1 class="page-title">
-  {% if is_index %}Latest: Week {{ week.week }}{% else %}Week {{ week.week }}{% endif %}
-  {% if provisional %}<span class="badge badge-provisional">in progress</span>{% endif %}
-</h1>
-{% if playoff %}
-<p class="note">Playoff week &mdash; not included in power rankings or the season board.</p>
-{% endif %}
-
-<section class="awards-grid">
-  <div class="award-card award-good">
-    <h3>Highest score</h3>
-    <p class="award-value">{{ week.awards.highest_score | fmt2 }}</p>
-    <p class="award-teams">{% for t in highest_score_teams %}{{ t.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
-  </div>
-  <div class="award-card award-bad">
-    <h3>Lowest score</h3>
-    <p class="award-value">{{ week.awards.lowest_score | fmt2 }}</p>
-    <p class="award-teams">{% for t in lowest_score_teams %}{{ t.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
-  </div>
-  <div class="award-card">
-    <h3>Best bench player</h3>
-    <p class="award-value">{{ week.awards.best_bench_points | fmt2 }}</p>
-    <p class="award-teams">{% for t, p in best_bench %}{{ p.name }} ({{ t.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
-  </div>
-  <div class="award-card">
-    <h3>Best starter</h3>
-    <p class="award-value">{{ week.awards.best_starter_points | fmt2 }}</p>
-    <p class="award-teams">{% for t, p in best_starter %}{{ p.name }} ({{ t.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
-  </div>
-  <div class="award-card">
-    <h3>Worst starter{% if week.awards.worst_starter_zero %} <span class="note-inline">(bye/inactive)</span>{% endif %}</h3>
-    <p class="award-value">{{ week.awards.worst_starter_points | fmt2 }}</p>
-    <p class="award-teams">{% for t, p in worst_starter %}{{ p.name }} ({{ t.name }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
-  </div>
-  <div class="award-card">
-    <h3>Closest game</h3>
-    <p class="award-value">{{ week.awards.closest_margin | fmt2 }}</p>
-    {% for pair in closest_matchups %}
-    <p class="award-teams">{% for side in pair %}{{ side.team.name }} {{ side.points | fmt2 }}{% if not loop.last %} &ndash; {% endif %}{% endfor %}</p>
-    {% endfor %}
-  </div>
-  <div class="award-card">
-    <h3>Biggest blowout</h3>
-    <p class="award-value">{{ week.awards.biggest_blowout_margin | fmt2 }}</p>
-    {% for pair in blowout_matchups %}
-    <p class="award-teams">{% for side in pair %}{{ side.team.name }} {{ side.points | fmt2 }}{% if not loop.last %} &ndash; {% endif %}{% endfor %}</p>
-    {% endfor %}
-  </div>
-  {% if costliest_lineup %}
-  {% set cl = costliest_lineup.row %}
-  <div class="award-card award-bad">
-    <h3>Costliest lineup call</h3>
-    <p class="award-value">{{ cl.left_on_bench | fmt2 }}</p>
-    {% set start, sat = cl.swaps[0] %}
-    <p class="award-teams">{{ costliest_lineup.team.name }}: {% if sat %}started {{ sat.name }} ({{ sat.points | fmt2 }}) over {{ start.name }} ({{ start.points | fmt2 }}){% else %}left a slot empty with {{ start.name }} ({{ start.points | fmt2 }}) on the bench{% endif %}</p>
-  </div>
+<div class="page-head">
+  {% if is_index %}<span class="page-kicker">Latest</span>{% endif %}
+  <h1 class="page-title">
+    Week {{ week.week }}
+    {% if provisional %}<span class="badge badge-provisional">in progress</span>{% endif %}
+    {% if playoff %}<span class="badge badge-playoff">playoffs</span>{% endif %}
+  </h1>
+  {% if playoff %}
+  <p class="lede">Playoff week &mdash; not included in power rankings or the season board.</p>
   {% endif %}
-</section>
+  {{ ui.week_pager(week.week) }}
+</div>
 
-<section class="chart-section">
-  <h2>Rank trajectory</h2>
-  <div class="chart-container chart-tall"><canvas id="chart-rank-trajectory" data-through-week="{{ week.week }}"></canvas></div>
-</section>
+{{ ui.toc([
+  ("power", "Rankings"),
+  ("awards", "Awards"),
+  ("results", "Results"),
+  ("positions", "Positions"),
+  ("lineups", "Lineups") if lineup_rows else none,
+  ("moves", "Roster moves"),
+] | select | list) }}
 
-<section class="chart-section">
-  <h2>This week's scores</h2>
-  <div class="chart-container"><canvas id="chart-week-scores" data-week="{{ week.week }}"></canvas></div>
-</section>
-
-<section>
-  <h2>Power rankings</h2>
-  <p class="note"><a href="{{ asset_prefix }}how-it-works.html#power">How the rankings are calculated</a></p>
+<section id="power">
+  <div class="section-head">
+    <h2>Power rankings</h2>
+    <a href="{{ asset_prefix }}how-it-works.html#power">How the rankings are calculated</a>
+  </div>
   {% if rankings_frozen %}
   <p class="note">This week is still in progress and isn't ranked yet &mdash; showing last week's rankings.</p>
   {% endif %}
@@ -81,35 +39,25 @@
   <table class="rankings-table">
     <thead>
       <tr>
-        <th>#</th>
-        <th></th>
         <th>Team</th>
-        <th>Record</th>
-        <th>All-play</th>
-        <th>Pts</th>
-        <th>Luck</th>
-        <th>Score</th>
-        <th>&Delta;</th>
+        <th class="num">Record</th>
+        <th class="num">All-play</th>
+        <th class="num">Pts</th>
+        <th class="num">Luck</th>
+        <th class="num">Score</th>
+        <th class="num">&Delta;</th>
       </tr>
     </thead>
     <tbody>
       {% for entry in ranking_rows %}
       <tr>
-        <td>{{ entry.row.rank }}</td>
-        <td>{% if entry.team.avatar_url %}<img class="team-avatar" src="{{ entry.team.avatar_url }}" alt="">{% endif %}</td>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
-        <td>{{ entry.row.record }}</td>
-        <td>{{ entry.row.allplay_record }}</td>
-        <td>{{ entry.week_points | fmt2 if entry.week_points is not none else "-" }}</td>
-        <td>{{ "%+.3f" | format(entry.row.luck) }}</td>
-        <td>{{ "%.3f" | format(entry.row.score) }}</td>
-        <td>
-          {% if entry.row.movement is none %}&mdash;
-          {% elif entry.row.movement > 0 %}<span class="up">&#9650;{{ entry.row.movement }}</span>
-          {% elif entry.row.movement < 0 %}<span class="down">&#9660;{{ -entry.row.movement }}</span>
-          {% else %}&mdash;
-          {% endif %}
-        </td>
+        {{ ui.team_cell(entry.team, rank=entry.row.rank) }}
+        <td class="num">{{ entry.row.record }}</td>
+        <td class="num">{{ entry.row.allplay_record }}</td>
+        <td class="num">{{ entry.week_points | fmt2 if entry.week_points is not none else "-" }}</td>
+        <td class="num {{ 'up' if entry.row.luck > 0.0005 else 'down' if entry.row.luck < -0.0005 }}">{{ "%+.3f" | format(entry.row.luck) }}</td>
+        <td class="num"><strong>{{ "%.3f" | format(entry.row.score) }}</strong></td>
+        <td class="num">{{ ui.movement(entry.row.movement) }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -117,21 +65,78 @@
   </div>
 </section>
 
-<section>
+<section class="chart-section">
+  <h2>Rank trajectory</h2>
+  <div class="chart-container chart-tall"><canvas id="chart-rank-trajectory" data-through-week="{{ week.week }}"></canvas></div>
+  <p class="chart-hint">Hover a line to pick out a team; tap a name in the legend to show only that team.</p>
+</section>
+
+<div id="awards" class="awards-grid">
+  {% call ui.award("Highest score", week.awards.highest_score | fmt2, "good") %}
+  <p class="award-teams">{{ ui.names(highest_score_teams) }}</p>
+  {% endcall %}
+  {% call ui.award("Lowest score", week.awards.lowest_score | fmt2, "bad") %}
+  <p class="award-teams">{{ ui.names(lowest_score_teams) }}</p>
+  {% endcall %}
+  {% call ui.award("Best starter", week.awards.best_starter_points | fmt2) %}
+  <p class="award-teams">{{ ui.players(best_starter) }}</p>
+  {% endcall %}
+  {% call ui.award("Best bench player", week.awards.best_bench_points | fmt2) %}
+  <p class="award-teams">{{ ui.players(best_bench) }}</p>
+  {% endcall %}
+  {% set worst_title %}Worst starter{% if week.awards.worst_starter_zero %} <span class="note-inline">(bye/inactive)</span>{% endif %}{% endset %}
+  {% call ui.award(worst_title, week.awards.worst_starter_points | fmt2) %}
+  <p class="award-teams">{{ ui.players(worst_starter) }}</p>
+  {% endcall %}
+  {% call ui.award("Closest game", week.awards.closest_margin | fmt2) %}
+  {% for pair in closest_matchups %}
+  <p class="award-teams">{% for side in pair %}{{ side.team.name }} {{ side.points | fmt2 }}{% if not loop.last %} &ndash; {% endif %}{% endfor %}</p>
+  {% endfor %}
+  {% endcall %}
+  {% call ui.award("Biggest blowout", week.awards.biggest_blowout_margin | fmt2) %}
+  {% for pair in blowout_matchups %}
+  <p class="award-teams">{% for side in pair %}{{ side.team.name }} {{ side.points | fmt2 }}{% if not loop.last %} &ndash; {% endif %}{% endfor %}</p>
+  {% endfor %}
+  {% endcall %}
+  {% if costliest_lineup %}
+  {% set cl = costliest_lineup.row %}
+  {% call ui.award("Costliest lineup call", cl.left_on_bench | fmt2, "bad") %}
+  {% set start, sat = cl.swaps[0] %}
+  <p class="award-teams">{{ costliest_lineup.team.name }}: {% if sat %}started {{ sat.name }} ({{ sat.points | fmt2 }}) over {{ start.name }} ({{ start.points | fmt2 }}){% else %}left a slot empty with {{ start.name }} ({{ start.points | fmt2 }}) on the bench{% endif %}</p>
+  {% endcall %}
+  {% endif %}
+</div>
+
+<section id="results">
+  <h2>Results</h2>
+  <ul class="scoreboard">
+    {% for r in results %}
+    <li class="matchup">
+      <div class="matchup-side matchup-winner">{{ ui.team_inline(r.winner_team) }}<span class="matchup-score">{{ r.winner_points | fmt2 }}</span></div>
+      <div class="matchup-side">{{ ui.team_inline(r.loser_team) }}<span class="matchup-score">{{ r.loser_points | fmt2 }}</span></div>
+      <span class="matchup-margin">by {{ r.margin | fmt2 }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <h3>This week's scores</h3>
+  <div class="chart-container"><canvas id="chart-week-scores" data-week="{{ week.week }}"></canvas></div>
+</section>
+
+<section id="positions">
   <h2>Position rankings</h2>
   {% if position_rank_rows %}
   <p class="note">Starter points at each position this week, with each team's rank in the league (#1 = most). Flex and superflex starters count at their own position.</p>
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Team</th>{% for pos in positions %}<th>{{ pos }}</th>{% endfor %}</tr></thead>
+    <thead><tr><th>Team</th>{% for pos in positions %}<th class="num">{{ pos }}</th>{% endfor %}</tr></thead>
     <tbody>
       {% for entry in position_rank_rows %}
       <tr>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
+        {{ ui.team_cell(entry.team) }}
         {% for pos in positions %}
         {% set rank = entry.row.ranks[pos] %}
         {% set lo, hi = position_rank_extremes[pos] %}
-        <td{% if lo != hi and rank == lo %} class="pos-best"{% elif lo != hi and rank == hi %} class="pos-worst"{% endif %}>{{ entry.row.points[pos] | fmt2 }} <span class="pos-rank">#{{ rank }}</span></td>
+        <td class="num{% if lo != hi and rank == lo %} pos-best{% elif lo != hi and rank == hi %} pos-worst{% endif %}">{{ entry.row.points[pos] | fmt2 }} <span class="pos-rank">#{{ rank }}</span></td>
         {% endfor %}
       </tr>
       {% endfor %}
@@ -144,21 +149,24 @@
 </section>
 
 {% if lineup_rows %}
-<section>
-  <h2>Lineup efficiency</h2>
-  <p class="note">Each team's score against the best lineup it could have set from the same roster. <a href="{{ asset_prefix }}how-it-works.html#lineups">How this works</a></p>
+<section id="lineups">
+  <div class="section-head">
+    <h2>Lineup efficiency</h2>
+    <a href="{{ asset_prefix }}how-it-works.html#lineups">How this works</a>
+  </div>
+  <p class="note">Each team's score against the best lineup it could have set from the same roster.</p>
   <div class="table-scroll">
-  <table class="data-table explainer-table">
-    <thead><tr><th>Team</th><th>Scored</th><th>Best possible</th><th>Missed</th><th>Should have started</th></tr></thead>
+  <table class="data-table">
+    <thead><tr><th>Team</th><th class="num">Scored</th><th class="num">Best possible</th><th class="num">Missed</th><th>Should have started</th></tr></thead>
     <tbody>
       {% for entry in lineup_rows %}
       {% set r = entry.row %}
       <tr>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
-        <td>{{ r.actual | fmt2 }}</td>
-        <td>{{ r.optimal | fmt2 }}</td>
-        <td>{% if r.left_on_bench > 0.005 %}<span class="down">{{ r.left_on_bench | fmt2 }}</span>{% else %}<span class="up">Perfect</span>{% endif %}</td>
-        <td>{% for start, sat in r.swaps %}{{ start.name }} ({{ start.points | fmt2 }}) {% if sat %}for {{ sat.name }} ({{ sat.points | fmt2 }}){% else %}in an empty slot{% endif %}{% if not loop.last %}; {% endif %}{% else %}&mdash;{% endfor %}</td>
+        {{ ui.team_cell(entry.team) }}
+        <td class="num">{{ r.actual | fmt2 }}</td>
+        <td class="num">{{ r.optimal | fmt2 }}</td>
+        <td class="num">{% if r.left_on_bench > 0.005 %}<span class="down">{{ r.left_on_bench | fmt2 }}</span>{% else %}<span class="up">Perfect</span>{% endif %}</td>
+        <td class="wrap">{% for start, sat in r.swaps %}{{ start.name }} ({{ start.points | fmt2 }}) {% if sat %}for {{ sat.name }} ({{ sat.points | fmt2 }}){% else %}in an empty slot{% endif %}{% if not loop.last %}; {% endif %}{% else %}&mdash;{% endfor %}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -167,7 +175,7 @@
 </section>
 {% endif %}
 
-<section>
+<section id="moves">
   <h2>Roster moves</h2>
   {% if roster_moves_rows %}
   <div class="table-scroll">
@@ -176,12 +184,12 @@
     <tbody>
       {% for entry in roster_moves_rows %}
       <tr>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}</td>
-        <td>
-          {% for m in entry.moves.added %}{{ m.player.name }}{% if m.move_type == "waiver" and m.faab %} (${{ m.faab }}){% elif m.move_type == "trade" %} (trade){% endif %}{% if not loop.last %}, {% endif %}{% else %}&mdash;{% endfor %}
+        {{ ui.team_cell(entry.team) }}
+        <td class="wrap">
+          {% for m in entry.moves.added %}{{ m.player.name }}{% if m.move_type == "waiver" and m.faab %} <span class="note-inline">${{ m.faab }}</span>{% elif m.move_type == "trade" %} <span class="note-inline">(trade)</span>{% endif %}{% if not loop.last %}, {% endif %}{% else %}&mdash;{% endfor %}
         </td>
-        <td>
-          {% for m in entry.moves.dropped %}{{ m.player.name }}{% if m.move_type == "trade" %} (trade){% endif %}{% if not loop.last %}, {% endif %}{% else %}&mdash;{% endfor %}
+        <td class="wrap">
+          {% for m in entry.moves.dropped %}{{ m.player.name }}{% if m.move_type == "trade" %} <span class="note-inline">(trade)</span>{% endif %}{% if not loop.last %}, {% endif %}{% else %}&mdash;{% endfor %}
         </td>
       </tr>
       {% endfor %}
@@ -191,19 +199,6 @@
   {% else %}
   <p class="note">No roster moves this week.</p>
   {% endif %}
-</section>
-
-<section>
-  <h2>Results</h2>
-  <ul class="results-list">
-    {% for r in results %}
-    <li>
-      <strong>{{ r.winner_team.name }}</strong> {{ r.winner_points | fmt2 }}
-      def. {{ r.loser_team.name }} {{ r.loser_points | fmt2 }}
-      <span class="margin">(by {{ r.margin | fmt2 }})</span>
-    </li>
-    {% endfor %}
-  </ul>
 </section>
 
 {% endblock %}

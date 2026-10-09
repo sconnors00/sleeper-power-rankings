@@ -1,392 +1,427 @@
+// Header. The theme button cycles auto (follow the OS) -> light -> dark; the
+// choice is saved and stamped on <html> as data-theme, which style.css keys
+// its tokens off, and an inline script in base.html applies it before first
+// paint. On a narrow screen the nav scrolls to show the current page's link.
+(function () {
+  "use strict";
+  var KEY = "ffpr-theme";
+  var MODES = ["auto", "light", "dark"];
+  var LABELS = { auto: "Theme: match device", light: "Theme: light", dark: "Theme: dark" };
+  var root = document.documentElement;
+
+  function current() {
+    var stamped = root.getAttribute("data-theme");
+    return stamped === "light" || stamped === "dark" ? stamped : "auto";
+  }
+  function show(button, mode) {
+    button.setAttribute("data-mode", mode);
+    button.setAttribute("aria-label", LABELS[mode]);
+    button.title = LABELS[mode];
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var nav = document.querySelector(".site-nav");
+    var here = nav && nav.querySelector('[aria-current="page"]');
+    if (here && nav.scrollWidth > nav.clientWidth) {
+      nav.scrollLeft = here.offsetLeft - nav.offsetLeft - (nav.clientWidth - here.offsetWidth) / 3;
+    }
+
+    var button = document.querySelector(".theme-toggle");
+    if (!button) return;
+    show(button, current());
+    button.hidden = false;
+    button.addEventListener("click", function () {
+      var mode = MODES[(MODES.indexOf(current()) + 1) % MODES.length];
+      if (mode === "auto") root.removeAttribute("data-theme");
+      else root.setAttribute("data-theme", mode);
+      try {
+        if (mode === "auto") window.localStorage.removeItem(KEY);
+        else window.localStorage.setItem(KEY, mode);
+      } catch (e) {
+        // blocked storage: the choice just lasts for this page
+      }
+      show(button, mode);
+      document.dispatchEvent(new CustomEvent("ffpr:theme"));
+    });
+  });
+})();
+
+// Charts (week and season pages). Colors come from the CSS tokens in
+// style.css, so they follow the theme; every chart is redrawn when it changes.
 (function () {
   "use strict";
   var DATA = window.FFPR;
   if (!DATA || typeof Chart === "undefined") return;
 
-  function isDark() {
-    var stamped = document.documentElement.getAttribute("data-theme");
-    if (stamped === "dark") return true;
-    if (stamped === "light") return false;
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  var C = {};
+  function readTokens() {
+    var css = getComputedStyle(document.documentElement);
+    function token(name) { return css.getPropertyValue(name).trim(); }
+    C = {
+      ink: token("--text-primary"),
+      secondary: token("--text-secondary"),
+      muted: token("--text-muted"),
+      gridline: token("--gridline"),
+      surface: token("--surface"),
+      border: token("--border"),
+      accent: token("--accent"),
+      font: token("--font"),
+    };
+    Chart.defaults.color = C.secondary;
+    Chart.defaults.borderColor = C.gridline;
+    Chart.defaults.font.family = C.font;
+    Chart.defaults.font.size = 11;
+    var tip = Chart.defaults.plugins.tooltip;
+    tip.backgroundColor = C.surface;
+    tip.titleColor = C.ink;
+    tip.bodyColor = C.secondary;
+    tip.borderColor = C.border;
+    tip.borderWidth = 1;
+    tip.padding = 10;
+    tip.cornerRadius = 8;
+    tip.boxPadding = 4;
+    tip.usePointStyle = true;
+    var legend = Chart.defaults.plugins.legend.labels;
+    legend.usePointStyle = true;
+    legend.pointStyle = "circle";
+    legend.boxWidth = 8;
+    legend.boxHeight = 8;
+    legend.padding = 12;
   }
-
-  var ink = isDark() ? "#ffffff" : "#0b0b0b";
-  var mutedInk = "#898781";
-  var gridline = isDark() ? "#2c2c2a" : "#e1e0d9";
-  var surface = isDark() ? "#1a1a19" : "#fcfcfb";
-
-  Chart.defaults.color = ink;
-  Chart.defaults.borderColor = gridline;
-  Chart.defaults.font.family = "system-ui, -apple-system, 'Segoe UI', sans-serif";
 
   function teamColor(rosterId) {
     var t = DATA.teams[String(rosterId)];
-    return t ? t.color : mutedInk;
+    return t ? t.color : C.muted;
   }
   function teamName(rosterId) {
     var t = DATA.teams[String(rosterId)];
     return t ? t.name : "Team " + rosterId;
   }
-
-  // Tap-to-isolate legend: tap a team, others fade; tap again to restore.
-  function isolateLegend(chart, legendItem, isolatedIndexRef) {
-    var idx = legendItem.datasetIndex;
-    if (isolatedIndexRef.value === idx) {
-      chart.data.datasets.forEach(function (ds, i) {
-        chart.setDatasetVisibility(i, true);
-      });
-      isolatedIndexRef.value = null;
-    } else {
-      chart.data.datasets.forEach(function (ds, i) {
-        chart.setDatasetVisibility(i, i === idx);
-      });
-      isolatedIndexRef.value = idx;
-    }
-    chart.update();
+  // "#2a78d6" at the given opacity.
+  function alpha(hex, a) {
+    var n = parseInt(hex.slice(1), 16);
+    return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
   }
 
-  function legendIsolatePlugin() {
-    var isolated = { value: null };
-    return {
-      onClick: function (e, legendItem, legend) {
-        isolateLegend(legend.chart, legendItem, isolated);
-      },
+  // Tap-to-isolate legend: tap a team, others hide; tap again to restore.
+  function isolateOnClick() {
+    var isolated = null;
+    return function (e, legendItem, legend) {
+      var chart = legend.chart;
+      var idx = legendItem.datasetIndex;
+      isolated = isolated === idx ? null : idx;
+      chart.data.datasets.forEach(function (ds, i) {
+        chart.setDatasetVisibility(i, isolated === null || i === isolated);
+      });
+      chart.update();
     };
   }
 
-  var baseFont = { size: 11 };
+  // Line charts with a line per team: hovering near a team's line fades the
+  // rest, and leaving the chart brings them all back. Team lines read
+  // chart.$highlighted through scriptable colors (see teamLine).
+  function highlightOnHover(event, elements, chart) {
+    var idx = elements.length ? elements[0].datasetIndex : null;
+    if (idx !== null && !chart.data.datasets[idx].$team) idx = null;
+    if (chart.$highlighted === idx) return;
+    chart.$highlighted = idx;
+    chart.update("none");
+  }
+  var clearHighlightOnLeave = {
+    id: "clearHighlightOnLeave",
+    afterEvent: function (chart, args) {
+      if (args.event.type === "mouseout") highlightOnHover(null, [], chart);
+    },
+  };
 
-  function renderRankTrajectory() {
-    var canvas = document.getElementById("chart-rank-trajectory");
-    if (!canvas) return;
-    var throughWeek = parseInt(canvas.getAttribute("data-through-week"), 10);
-    var rt = DATA.rankTrajectory;
-    var weeks = rt.weeks.filter(function (w) {
-      return w <= throughWeek;
-    });
-    var n = weeks.length;
+  function teamLine(rid, data) {
+    var color = teamColor(rid);
+    var faded = alpha(color, 0.15);
+    function shade(ctx) {
+      var on = ctx.chart.$highlighted;
+      return on == null || on === ctx.datasetIndex ? color : faded;
+    }
+    return {
+      label: teamName(rid),
+      data: data,
+      $team: true,
+      borderColor: shade,
+      backgroundColor: shade,
+      pointBackgroundColor: shade,
+      pointBorderColor: shade,
+      borderWidth: function (ctx) { return ctx.chart.$highlighted === ctx.datasetIndex ? 3.5 : 2; },
+      pointRadius: 2.5,
+      pointHoverRadius: 6,
+      spanGaps: true,
+      cubicInterpolationMode: "monotone",
+    };
+  }
 
-    var datasets = Object.keys(rt.series).map(function (rid) {
-      var full = rt.series[rid];
-      var data = full.slice(0, n);
+  var xAxis = { grid: { display: false }, border: { display: false } };
+  function yAxis(extra) {
+    var axis = { grid: { color: C.gridline }, border: { display: false } };
+    Object.keys(extra || {}).forEach(function (k) { axis[k] = extra[k]; });
+    return axis;
+  }
+  function weekLabels(weeks) {
+    return weeks.map(function (w) { return "Wk " + w; });
+  }
+
+  var renderers = {
+    "chart-rank-trajectory": function (canvas) {
+      var throughWeek = parseInt(canvas.getAttribute("data-through-week"), 10);
+      var rt = DATA.rankTrajectory;
+      var weeks = rt.weeks.filter(function (w) { return w <= throughWeek; });
+      var datasets = Object.keys(rt.series).map(function (rid) {
+        return teamLine(rid, rt.series[rid].slice(0, weeks.length));
+      });
       return {
-        label: teamName(rid),
-        data: data,
-        borderColor: teamColor(rid),
-        backgroundColor: teamColor(rid),
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        borderWidth: 2,
-        tension: 0,
-        spanGaps: true,
-      };
-    });
-
-    var numTeams = Object.keys(rt.series).length;
-
-    new Chart(canvas, {
-      type: "line",
-      data: { labels: weeks.map(function (w) { return "Wk " + w; }), datasets: datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "nearest", intersect: false },
-        scales: {
-          y: {
-            reverse: true,
-            min: 1,
-            max: numTeams,
-            ticks: { stepSize: 1, font: baseFont },
-            grid: { color: gridline },
+        type: "line",
+        data: { labels: weekLabels(weeks), datasets: datasets },
+        plugins: [clearHighlightOnLeave],
+        options: {
+          interaction: { mode: "nearest", intersect: false },
+          onHover: highlightOnHover,
+          scales: {
+            y: yAxis({ reverse: true, min: 1, max: datasets.length, ticks: { stepSize: 1 } }),
+            x: xAxis,
           },
-          x: { ticks: { font: baseFont }, grid: { display: false } },
-        },
-        plugins: {
-          legend: {
-            position: "bottom",
-            labels: { boxWidth: 10, font: { size: 10 } },
-            onClick: legendIsolatePlugin().onClick,
-          },
-          tooltip: {
-            callbacks: {
-              label: function (ctx) {
-                return ctx.dataset.label + ": rank " + ctx.parsed.y;
+          plugins: {
+            legend: { position: "bottom", onClick: isolateOnClick() },
+            tooltip: {
+              callbacks: {
+                label: function (ctx) { return ctx.dataset.label + ": #" + ctx.parsed.y; },
               },
             },
           },
         },
-      },
-    });
-  }
+      };
+    },
 
-  function renderWeekScores() {
-    var canvas = document.getElementById("chart-week-scores");
-    if (!canvas) return;
-    var week = canvas.getAttribute("data-week");
-    var rows = (DATA.weekMatchups[week] || []).slice();
-    rows.sort(function (a, b) {
-      return b.points - a.points;
-    });
-
-    new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: rows.map(function (r) { return teamName(r.rosterId); }),
-        datasets: [
-          {
+    "chart-week-scores": function (canvas) {
+      var rows = (DATA.weekMatchups[canvas.getAttribute("data-week")] || []).slice();
+      rows.sort(function (a, b) { return b.points - a.points; });
+      return {
+        type: "bar",
+        data: {
+          labels: rows.map(function (r) { return teamName(r.rosterId); }),
+          datasets: [{
             data: rows.map(function (r) { return r.points; }),
             backgroundColor: rows.map(function (r) { return teamColor(r.rosterId); }),
-            borderRadius: 4,
-          },
-        ],
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (ctx) {
-                var r = rows[ctx.dataIndex];
-                var opp = r.opponentRosterId != null ? teamName(r.opponentRosterId) : "bye";
-                var margin = r.margin != null ? (r.margin >= 0 ? "+" : "") + r.margin.toFixed(2) : "";
-                return r.points.toFixed(2) + " vs " + opp + " (" + margin + ")";
+            borderRadius: 6,
+            borderSkipped: false,
+            maxBarThickness: 22,
+          }],
+        },
+        options: {
+          indexAxis: "y",
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function (ctx) {
+                  var r = rows[ctx.dataIndex];
+                  var opp = r.opponentRosterId != null ? teamName(r.opponentRosterId) : "bye";
+                  var margin = r.margin != null ? (r.margin >= 0 ? "+" : "") + r.margin.toFixed(2) : "";
+                  return r.points.toFixed(2) + " vs " + opp + " (" + margin + ")";
+                },
               },
             },
           },
+          scales: { x: yAxis(), y: xAxis },
         },
-        scales: {
-          x: { grid: { color: gridline } },
-          y: { grid: { display: false } },
-        },
-      },
-    });
-  }
-
-  function renderWeeklyPointsByTeam() {
-    var canvas = document.getElementById("chart-weekly-points");
-    if (!canvas) return;
-    var wp = DATA.weeklyPointsByTeam;
-    var datasets = Object.keys(wp.series).map(function (rid) {
-      return {
-        label: teamName(rid),
-        data: wp.series[rid],
-        borderColor: teamColor(rid),
-        backgroundColor: teamColor(rid),
-        pointRadius: 2,
-        pointHoverRadius: 5,
-        borderWidth: 2,
-        tension: 0.15,
-        spanGaps: true,
       };
-    });
-    datasets.push({
-      label: "League average",
-      data: wp.leagueAvg,
-      borderColor: mutedInk,
-      borderDash: [6, 4],
-      borderWidth: 2,
-      pointRadius: 0,
-      tension: 0.15,
-    });
+    },
 
-    new Chart(canvas, {
-      type: "line",
-      data: { labels: wp.weeks.map(function (w) { return "Wk " + w; }), datasets: datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "nearest", intersect: false },
-        plugins: {
-          legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } }, onClick: legendIsolatePlugin().onClick },
+    "chart-weekly-points": function () {
+      var wp = DATA.weeklyPointsByTeam;
+      var datasets = Object.keys(wp.series).map(function (rid) {
+        return teamLine(rid, wp.series[rid]);
+      });
+      datasets.push({
+        label: "League average",
+        data: wp.leagueAvg,
+        borderColor: C.muted,
+        backgroundColor: C.muted,
+        borderDash: [6, 4],
+        borderWidth: 2,
+        pointRadius: 0,
+        cubicInterpolationMode: "monotone",
+      });
+      return {
+        type: "line",
+        data: { labels: weekLabels(wp.weeks), datasets: datasets },
+        plugins: [clearHighlightOnLeave],
+        options: {
+          interaction: { mode: "nearest", intersect: false },
+          onHover: highlightOnHover,
+          plugins: { legend: { position: "bottom", onClick: isolateOnClick() } },
+          scales: { x: xAxis, y: yAxis() },
         },
-        scales: {
-          x: { ticks: { font: baseFont }, grid: { display: false } },
-          y: { grid: { color: gridline } },
+      };
+    },
+
+    "chart-scoring-spread": function () {
+      var rows = DATA.scoringSpread;
+      return {
+        type: "bar",
+        data: {
+          labels: rows.map(function (r) { return "Wk " + r.week; }),
+          datasets: [
+            {
+              label: "Range",
+              data: rows.map(function (r) { return [r.low, r.high]; }),
+              backgroundColor: alpha(C.accent, 0.35),
+              borderColor: C.accent,
+              borderWidth: 1,
+              borderRadius: 6,
+              borderSkipped: false,
+              maxBarThickness: 34,
+            },
+            {
+              label: "Median",
+              type: "line",
+              data: rows.map(function (r) { return r.median; }),
+              borderColor: C.ink,
+              borderDash: [4, 4],
+              pointRadius: 3,
+              pointBackgroundColor: C.ink,
+              borderWidth: 1,
+            },
+          ],
         },
-      },
-    });
-  }
-
-  function renderScoringSpread() {
-    var canvas = document.getElementById("chart-scoring-spread");
-    if (!canvas) return;
-    var rows = DATA.scoringSpread;
-
-    new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: rows.map(function (r) { return "Wk " + r.week; }),
-        datasets: [
-          {
-            label: "Range",
-            data: rows.map(function (r) { return [r.low, r.high]; }),
-            backgroundColor: isDark() ? "#3987e5aa" : "#2a78d6aa",
-            borderRadius: 4,
-          },
-          {
-            label: "Median",
-            type: "line",
-            data: rows.map(function (r) { return r.median; }),
-            borderColor: mutedInk,
-            borderDash: [4, 4],
-            pointRadius: 3,
-            pointBackgroundColor: mutedInk,
-            borderWidth: 1,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (ctx) {
-                var r = rows[ctx.dataIndex];
-                if (ctx.dataset.label === "Median") return "Median: " + r.median.toFixed(2);
-                return (
-                  "Top: " + teamName(r.highRosterId) + " " + r.high.toFixed(2) +
-                  " | Low: " + teamName(r.lowRosterId) + " " + r.low.toFixed(2)
-                );
+        options: {
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function (ctx) {
+                  var r = rows[ctx.dataIndex];
+                  if (ctx.dataset.label === "Median") return "Median: " + r.median.toFixed(2);
+                  return [
+                    "Top: " + teamName(r.highRosterId) + " " + r.high.toFixed(2),
+                    "Low: " + teamName(r.lowRosterId) + " " + r.low.toFixed(2),
+                  ];
+                },
               },
             },
           },
+          scales: { x: xAxis, y: yAxis() },
         },
-        scales: {
-          x: { ticks: { font: baseFont }, grid: { display: false } },
-          y: { grid: { color: gridline } },
+      };
+    },
+
+    "chart-luck": function () {
+      var rows = DATA.luck;
+      return {
+        type: "scatter",
+        data: {
+          datasets: [
+            {
+              label: "Teams",
+              data: rows.map(function (r) { return { x: r.allplayPct, y: r.winPct }; }),
+              backgroundColor: rows.map(function (r) { return teamColor(r.rosterId); }),
+              borderColor: C.surface,
+              borderWidth: 2,
+              pointRadius: 8,
+              pointHoverRadius: 10,
+            },
+            {
+              label: "Even luck",
+              type: "line",
+              data: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
+              borderColor: C.muted,
+              borderDash: [4, 4],
+              pointRadius: 0,
+              borderWidth: 1,
+            },
+          ],
         },
-      },
-    });
-  }
-
-  function renderLuck() {
-    var canvas = document.getElementById("chart-luck");
-    if (!canvas) return;
-    var rows = DATA.luck;
-
-    var maxVal = 1;
-    var scatterData = rows.map(function (r) {
-      return { x: r.allplayPct, y: r.winPct, r };
-    });
-
-    new Chart(canvas, {
-      type: "scatter",
-      data: {
-        datasets: [
-          {
-            label: "Teams",
-            data: scatterData,
-            backgroundColor: rows.map(function (r) { return teamColor(r.rosterId); }),
-            pointRadius: 7,
-            pointHoverRadius: 9,
-          },
-          {
-            label: "Even luck",
-            type: "line",
-            data: [
-              { x: 0, y: 0 },
-              { x: maxVal, y: maxVal },
-            ],
-            borderColor: mutedInk,
-            borderDash: [4, 4],
-            pointRadius: 0,
-            borderWidth: 1,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (ctx) {
-                if (ctx.dataset.label !== "Teams") return null;
-                var r = rows[ctx.dataIndex];
-                return teamName(r.rosterId) + ": " + r.record + " (all-play " + r.allplayRecord + ")";
+        options: {
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              filter: function (ctx) { return ctx.dataset.label === "Teams"; },
+              callbacks: {
+                label: function (ctx) {
+                  var r = rows[ctx.dataIndex];
+                  return teamName(r.rosterId) + ": " + r.record + " (all-play " + r.allplayRecord + ")";
+                },
               },
             },
           },
+          scales: {
+            x: yAxis({ title: { display: true, text: "All-play win %" }, min: 0, max: 1 }),
+            y: yAxis({ title: { display: true, text: "Actual win %" }, min: 0, max: 1 }),
+          },
         },
-        scales: {
-          x: { title: { display: true, text: "All-play win %" }, min: 0, max: 1, grid: { color: gridline } },
-          y: { title: { display: true, text: "Actual win %" }, min: 0, max: 1, grid: { color: gridline } },
+      };
+    },
+
+    "chart-pf-pa": function () {
+      var rows = DATA.pfVsPa.slice().sort(function (a, b) { return b.pf - a.pf; });
+      return {
+        type: "bar",
+        data: {
+          labels: rows.map(function (r) { return teamName(r.rosterId); }),
+          datasets: [
+            { label: "PF", data: rows.map(function (r) { return r.pf; }), backgroundColor: C.accent, borderRadius: 4, maxBarThickness: 14 },
+            { label: "PA", data: rows.map(function (r) { return r.pa; }), backgroundColor: alpha(C.muted, 0.6), borderRadius: 4, maxBarThickness: 14 },
+          ],
         },
-      },
-    });
-  }
-
-  function renderPfVsPa() {
-    var canvas = document.getElementById("chart-pf-pa");
-    if (!canvas) return;
-    var rows = DATA.pfVsPa.slice().sort(function (a, b) { return b.pf - a.pf; });
-
-    new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: rows.map(function (r) { return teamName(r.rosterId); }),
-        datasets: [
-          { label: "PF", data: rows.map(function (r) { return r.pf; }), backgroundColor: "#2a78d6", borderRadius: 4 },
-          { label: "PA", data: rows.map(function (r) { return r.pa; }), backgroundColor: mutedInk, borderRadius: 4 },
-        ],
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { position: "bottom" } },
-        scales: {
-          x: { grid: { color: gridline } },
-          y: { grid: { display: false } },
+        options: {
+          indexAxis: "y",
+          plugins: { legend: { position: "bottom" } },
+          scales: { x: yAxis(), y: xAxis },
         },
-      },
-    });
-  }
+      };
+    },
 
-  function renderBenchPoints() {
-    var canvas = document.getElementById("chart-bench");
-    if (!canvas) return;
-    var rows = DATA.benchPoints.slice().sort(function (a, b) { return b.points - a.points; });
-
-    new Chart(canvas, {
-      type: "bar",
-      data: {
-        labels: rows.map(function (r) { return teamName(r.rosterId); }),
-        datasets: [
-          {
+    "chart-bench": function () {
+      var rows = DATA.benchPoints.slice().sort(function (a, b) { return b.points - a.points; });
+      return {
+        type: "bar",
+        data: {
+          labels: rows.map(function (r) { return teamName(r.rosterId); }),
+          datasets: [{
             data: rows.map(function (r) { return r.points; }),
             backgroundColor: rows.map(function (r) { return teamColor(r.rosterId); }),
-            borderRadius: 4,
-          },
-        ],
-      },
-      options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { color: gridline } },
-          y: { grid: { display: false } },
+            borderRadius: 6,
+            borderSkipped: false,
+            maxBarThickness: 22,
+          }],
         },
-      },
+        options: {
+          indexAxis: "y",
+          plugins: { legend: { display: false } },
+          scales: { x: yAxis(), y: xAxis },
+        },
+      };
+    },
+  };
+
+  var charts = [];
+  function renderAll() {
+    charts.forEach(function (chart) { chart.destroy(); });
+    charts = [];
+    readTokens();
+    Object.keys(renderers).forEach(function (id) {
+      var canvas = document.getElementById(id);
+      if (!canvas) return;
+      var config = renderers[id](canvas);
+      config.options.responsive = true;
+      config.options.maintainAspectRatio = false;
+      charts.push(new Chart(canvas, config));
     });
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    renderRankTrajectory();
-    renderWeekScores();
-    renderWeeklyPointsByTeam();
-    renderScoringSpread();
-    renderLuck();
-    renderPfVsPa();
-    renderBenchPoints();
+    renderAll();
+    document.addEventListener("ffpr:theme", renderAll);
+    if (window.matchMedia) {
+      var media = window.matchMedia("(prefers-color-scheme: dark)");
+      if (media.addEventListener) media.addEventListener("change", renderAll);
+    }
   });
 })();
 

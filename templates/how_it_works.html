@@ -1,10 +1,28 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% set active_page = "how" %}
 {% block title %}How it works &middot; {{ league_name }}{% endblock %}
 {% block content %}
 
+<div class="page-head">
 <h1 class="page-title">How the rankings work</h1>
 
 <p class="lede">Power rankings try to answer &ldquo;who is actually the best team right now?&rdquo; A record alone can't do that, because a good team can go 1&ndash;2 by drawing the week's top scorers. So each team gets a score that blends four signals, and the highest score is #1.</p>
+</div>
+
+{{ ui.toc([
+  ("power", "Power rankings"),
+  ("columns", "Reading the table"),
+  ("timing", "When a week counts"),
+  ("preseason", "Preseason"),
+  ("positions", "Positions"),
+  ("playoff-odds", "Playoff odds"),
+  ("lineups", "Lineups"),
+  ("pickups", "Pickups & trades"),
+  ("trade-values", "Trade values") if trade_values else none,
+  ("rivalries", "Rivalries"),
+  ("draft", "Draft grades") if has_draft else none,
+] | select | list) }}
 
 <section id="power">
   <h2>Power rankings</h2>
@@ -39,7 +57,7 @@
 
   {% if example %}
   <h3>Worked example: Week {{ example.week }}'s #1</h3>
-  <p><span class="team-swatch" style="background:{{ example.team.color }}"></span> <strong>{{ example.team.name }}</strong></p>
+  <p><strong>{{ ui.team_inline(example.team) }}</strong></p>
   <div class="table-scroll">
   <table class="data-table explainer-table">
     <thead><tr><th>Signal</th><th>Value</th><th>&times; Weight</th><th>Adds</th></tr></thead>

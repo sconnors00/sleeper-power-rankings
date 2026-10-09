@@ -1,22 +1,44 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% set active_page = "draft" %}
 {% block title %}Draft grades &middot; {{ league_name }}{% endblock %}
+{% macro pick_table(rows, tone) -%}
+<div class="table-scroll">
+<table class="data-table">
+  <thead><tr><th>Player</th><th>Pos</th><th>Team</th><th class="num">Paid</th><th class="num">Value</th><th class="num">Surplus</th></tr></thead>
+  <tbody>
+    {% for g in rows %}
+    <tr>
+      <td>{{ g.player.name }}</td>
+      <td>{{ g.player.position }}</td>
+      {{ ui.team_cell(teams[g.roster_id]) }}
+      <td class="num">${{ g.amount }}</td>
+      <td class="num">{{ g.expected | fmt2 }}</td>
+      <td class="num {{ tone }}"><strong>{{ "%+.2f" | format(g.surplus) }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
 {% block content %}
 
-<h1 class="page-title">Draft grades</h1>
-<p class="note">
-  Auction surplus: each pick's market value (the league's own price-vs-rank curve)
-  minus what was paid, summed per team. ${{ draft.budget }} budget.
-  Keepers are shown but not graded &mdash; their prices come from keeper rules, not bidding.
-</p>
+<div class="page-head">
+  <span class="page-kicker">{{ season_year }} auction</span>
+  <h1 class="page-title">Draft grades</h1>
+  <p class="lede">
+    Auction surplus: each pick's market value (the league's own price-vs-rank curve)
+    minus what was paid, summed per team. ${{ draft.budget }} budget.
+    Keepers are shown but not graded &mdash; their prices come from keeper rules, not bidding.
+  </p>
+</div>
 
-<section class="awards-grid">
+<div class="awards-grid">
   {% for t in draft.teams %}
-  <div class="award-card">
-    <h3>
-      {% if teams[t.roster_id].avatar_url %}<img class="team-avatar team-avatar-inline" src="{{ teams[t.roster_id].avatar_url }}" alt="">{% endif %}
-      {{ teams[t.roster_id].name }}
-    </h3>
-    <p class="award-value">{{ t.grade }}</p>
+  {% set letter = t.grade[:1] | lower %}
+  <div class="award-card grade-card-{{ letter }}">
+    <h3>{{ ui.team_inline(teams[t.roster_id]) }}</h3>
+    <p class="award-value grade grade-{{ letter }}">{{ t.grade }}</p>
     <p class="award-teams">
       spent ${{ t.spent }} &middot; value {{ t.value | fmt2 }}
       &middot; surplus <span class="{{ 'up' if t.surplus >= 0 else 'down' }}">{{ "%+.2f" | format(t.surplus) }}</span>
@@ -33,48 +55,16 @@
     {% endif %}
   </div>
   {% endfor %}
-</section>
+</div>
 
 <section>
   <h2>Biggest steals</h2>
-  <div class="table-scroll">
-  <table class="data-table">
-    <thead><tr><th>Player</th><th>Pos</th><th>Team</th><th>Paid</th><th>Value</th><th>Surplus</th></tr></thead>
-    <tbody>
-      {% for g in draft.steals %}
-      <tr>
-        <td>{{ g.player.name }}</td>
-        <td>{{ g.player.position }}</td>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[g.roster_id].color }}"></span>{{ teams[g.roster_id].name }}</td>
-        <td>${{ g.amount }}</td>
-        <td>{{ g.expected | fmt2 }}</td>
-        <td class="up">{{ "%+.2f" | format(g.surplus) }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
+  {{ pick_table(draft.steals, "up") }}
 </section>
 
 <section>
   <h2>Biggest overpays</h2>
-  <div class="table-scroll">
-  <table class="data-table">
-    <thead><tr><th>Player</th><th>Pos</th><th>Team</th><th>Paid</th><th>Value</th><th>Surplus</th></tr></thead>
-    <tbody>
-      {% for g in draft.overpays %}
-      <tr>
-        <td>{{ g.player.name }}</td>
-        <td>{{ g.player.position }}</td>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[g.roster_id].color }}"></span>{{ teams[g.roster_id].name }}</td>
-        <td>${{ g.amount }}</td>
-        <td>{{ g.expected | fmt2 }}</td>
-        <td class="down">{{ "%+.2f" | format(g.surplus) }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  </div>
+  {{ pick_table(draft.overpays, "down") }}
 </section>
 
 {% endblock %}

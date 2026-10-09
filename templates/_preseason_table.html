@@ -1,30 +1,24 @@
+{% import "_macros.html" as ui with context %}
 {% if preseason_rows %}
-<section>
+<section id="preseason">
   <h2>Pre-season power rankings</h2>
   <p class="note">Based on last season's final power rankings, carried over by roster.</p>
   <div class="table-scroll">
   <table class="rankings-table">
     <thead>
       <tr>
-        <th>#</th>
-        <th></th>
         <th>Team</th>
-        <th>Last season</th>
-        <th>PF</th>
+        <th class="num">Last season</th>
+        <th class="num">PF</th>
       </tr>
     </thead>
     <tbody>
       {% for entry in preseason_rows %}
+      {% set extra %}{% if entry.row.champion %} <span title="Reigning champion">&#127942;</span>{% endif %}{% if entry.row.new_owner %}<span class="badge badge-provisional">new owner</span>{% endif %}{% endset %}
       <tr>
-        <td>{{ entry.row.rank }}</td>
-        <td>{% if entry.team.avatar_url %}<img class="team-avatar" src="{{ entry.team.avatar_url }}" alt="">{% endif %}</td>
-        <td class="team-cell">
-          <span class="team-swatch" style="background:{{ entry.team.color }}"></span>{{ entry.team.name }}
-          {% if entry.row.champion %}<span title="Reigning champion">&#127942;</span>{% endif %}
-          {% if entry.row.new_owner %}<span class="badge badge-provisional">new owner</span>{% endif %}
-        </td>
-        <td>{% if entry.row.prev_rank %}#{{ entry.row.prev_rank }} ({{ entry.row.prev_record }}){% else %}&mdash;{% endif %}</td>
-        <td>{{ entry.row.prev_pf | fmt2 if entry.row.prev_pf is not none else "-" }}</td>
+        {{ ui.team_cell(entry.team, rank=entry.row.rank, extra=extra) }}
+        <td class="num">{% if entry.row.prev_rank %}#{{ entry.row.prev_rank }} ({{ entry.row.prev_record }}){% else %}&mdash;{% endif %}</td>
+        <td class="num">{{ entry.row.prev_pf | fmt2 if entry.row.prev_pf is not none else "-" }}</td>
       </tr>
       {% endfor %}
     </tbody>
