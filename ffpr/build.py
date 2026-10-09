@@ -87,6 +87,7 @@ def build_data_js(season: SeasonSummary) -> str:
         str(rid): {
             "name": t.name,
             "color": t.color,
+            "colorDark": t.color_dark or t.color,
             "avatar": t.avatar_url,
         }
         for rid, t in season.teams.items()
@@ -163,9 +164,10 @@ def build_data_js(season: SeasonSummary) -> str:
         )
 
     last_week = season.weeks[-1] if season.weeks else None
+    # Every team plays every regular-season week (twice, counting a median game).
+    games = len(season.weeks) * (2 if season.league_average_match else 1)
     luck = []
     pf_vs_pa = []
-    bench_points = []
     if last_week is not None:
         for row in sorted(last_week.power_rankings, key=lambda r: r.roster_id):
             luck.append(
@@ -175,11 +177,11 @@ def build_data_js(season: SeasonSummary) -> str:
                     "winPct": row.win_pct,
                     "record": row.record,
                     "allplayRecord": row.allplay_record,
+                    "games": games,
                 }
             )
     for row in season.season_board.pf_leaderboard:
         pf_vs_pa.append({"rosterId": row.roster_id, "pf": row.pf, "pa": row.pa})
-        bench_points.append({"rosterId": row.roster_id, "points": row.bench_points})
 
     payload = {
         "season": season.season,
@@ -194,7 +196,6 @@ def build_data_js(season: SeasonSummary) -> str:
         "scoringSpread": scoring_spread,
         "luck": luck,
         "pfVsPa": pf_vs_pa,
-        "benchPoints": bench_points,
     }
     trade = _trade_payload(season)
     if trade is not None:
@@ -265,7 +266,17 @@ def _all_week_numbers(season: SeasonSummary) -> list[int]:
     return weeks
 
 
-def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) -> dict:
+def _rank_extremes(rows) -> dict[str, tuple[int, int]]:
+    """Each position's best and worst rank across these rows (with per-position
+    `ranks`), so templates can mark the league's best and worst at it."""
+    extremes = {}
+    for pos in POSITIONS:
+        ranks = [row.ranks[pos] for row in rows]
+        extremes[pos] = (min(ranks), max(ranks)) if ranks else (1, 1)
+    return extremes
+
+
+def _week_context(season: SeasonSummary, wk, is_index: bool) -> dict:
     teams = season.teams
     matchups_by_roster = {m.roster_id: m for m in wk.matchups}
     rankings_frozen = not wk.power_rankings and bool(season.weeks)
@@ -328,14 +339,10 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
             ({"team": teams[row.roster_id], "row": row} for row in wk.position_ranks),
             key=lambda e: -(matchups_by_roster[e["row"].roster_id].team_points),
         )
-        for pos in POSITIONS:
-            ranks = [row.ranks[pos] for row in wk.position_ranks]
-            position_rank_extremes[pos] = (min(ranks), max(ranks))
+        position_rank_extremes = _rank_extremes(wk.position_ranks)
 
     return {
-        "season": season,
         "week": wk,
-        "teams": teams,
         "ranking_rows": ranking_rows,
         "results": results,
         "closest_matchups": closest,
@@ -351,7 +358,6 @@ def _week_context(season: SeasonSummary, wk, asset_prefix: str, is_index: bool) 
         "best_bench": [(teams[rid], p) for rid, p in awards.best_bench],
         "best_starter": [(teams[rid], p) for rid, p in awards.best_starter],
         "worst_starter": [(teams[rid], p) for rid, p in awards.worst_starter],
-        "asset_prefix": asset_prefix,
         "is_index": is_index,
         "playoff": wk.week >= season.playoff_week_start,
         "provisional": wk.week == season.provisional_week,
@@ -476,7 +482,7 @@ def _trades_context(season: SeasonSummary) -> dict:
             }
         )
 
-    ctx: dict = {"trade_history": history, "values": tv, "weeks_left": 0}
+    ctx: dict = {"trade_history": history, "values": tv}
     if tv is None:
         return ctx
 
@@ -490,11 +496,6 @@ def _trades_context(season: SeasonSummary) -> dict:
         if pos in tv.replacement and rows:
             board.append({"position": pos, "replacement": tv.replacement[pos], "rows": rows})
 
-    extremes = {}
-    for pos in POSITIONS:
-        ranks = [row.ranks[pos] for row in tv.strength]
-        extremes[pos] = (min(ranks), max(ranks)) if ranks else (1, 1)
-
     ctx.update(
         {
             "calc_teams": sorted(
@@ -502,9 +503,8 @@ def _trades_context(season: SeasonSummary) -> dict:
             ),
             "value_board": board,
             "strength_rows": [{"team": teams[row.roster_id], "row": row} for row in tv.strength],
-            "strength_extremes": extremes,
+            "strength_extremes": _rank_extremes(tv.strength),
             "positions": POSITIONS,
-            "weeks_left": tv.weeks_left,
             "trade_deadline": tv.trade_deadline,
             "deadline_passed": (
                 tv.trade_deadline is not None and season.through_week >= tv.trade_deadline
@@ -528,7 +528,6 @@ def _trade_example(season: SeasonSummary) -> dict | None:
     played = sum(w * a for w, a in zip(tv.weights, pv.availability, strict=True))
     return {
         "pv": pv,
-        "team": season.teams.get(pv.roster_id),
         "replacement": tv.replacement[pv.player.position],
         # the weighted share of the weeks left he plays, which scales his surplus
         "share": played / sum(tv.weights) if sum(tv.weights) else 1.0,
@@ -593,7 +592,6 @@ def _replacement_in_order(season: SeasonSummary) -> list[tuple[str, float]]:
 def render_site(
     season: SeasonSummary,
     output_dir: Path,
-    site_url: str = "",
     all_seasons: list[str] | None = None,
     site_root_prefix: str = "",
     rivalries: list[Manager] | None = None,
@@ -620,19 +618,50 @@ def render_site(
     data_js = build_data_js(season)
     (output_dir / "data.js").write_text(data_js)
 
+    preseason_rows = [{"row": row, "team": season.teams[row.roster_id]} for row in season.preseason]
+    week_summaries = [w for w in (*season.weeks, season.provisional_week_summary) if w is not None]
+
+    # Every page this season gets, as (path, template, page context). The nav
+    # shows a page only if it's in this list, so adding a page is one entry.
+    pages: list[tuple[str, str, dict]] = []
+    if season.weeks:
+        latest = _week_context(season, season.weeks[-1], is_index=True)
+        pages.append(("index.html", "week.html", latest))
+        board = {"season": season, "board": season.season_board}
+        pages.append(("season.html", "season.html", board))
+    else:
+        pages.append(("index.html", "landing.html", {"preseason_rows": preseason_rows}))
+    if season.preseason:
+        pages.append((_week_url(0), "week0.html", {"preseason_rows": preseason_rows}))
+    for wk in week_summaries:
+        pages.append((_week_url(wk.week), "week.html", _week_context(season, wk, is_index=False)))
+    if _season_is_complete(season):
+        recap = {"records": season.season_board.records}
+        pages.append((_week_url(season.playoff_week_start), "season_recap.html", recap))
+    if season.roster_report is not None:
+        pages.append(("rosters.html", "rosters.html", {"report": season.roster_report}))
+    if _has_trades_page(season):
+        pages.append(("trades.html", "trades.html", _trades_context(season)))
+    if season.draft is not None:
+        pages.append(("draft.html", "draft.html", {"draft": season.draft}))
+    if rivalries:
+        rivals = {
+            "managers": rivalries,
+            "by_id": {m.owner_id: m for m in rivalries},
+            "highlights": rivalry_highlights(rivalries),
+        }
+        pages.append(("rivalries.html", "rivalries.html", rivals))
+    pages.append(("how-it-works.html", "how_it_works.html", _how_it_works_context(season)))
+
     env = _build_jinja_env()
     common = {
         "asset_version": _asset_version(data_js),
-        "site_url": site_url,
         "chart_js_url": CHART_JS_URL,
         "chart_js_sri": CHART_JS_SRI,
         "league_name": season.league_name,
         "season_year": season.season,
-        "has_draft": season.draft is not None,
-        "has_season": bool(season.weeks),
-        "has_rivalries": bool(rivalries),
-        "has_trades": _has_trades_page(season),
-        "has_rosters": season.roster_report is not None,
+        "teams": season.teams,
+        "built": {path for path, _, _ in pages},
         "all_seasons": all_seasons or [season.season],
         "site_root_prefix": site_root_prefix,
         "year_url": _year_url,
@@ -640,96 +669,10 @@ def render_site(
         "all_weeks": _all_week_numbers(season),
         "week_url": _week_url,
     }
-
-    week_template = env.get_template("week.html")
-    preseason_rows = [{"row": row, "team": season.teams[row.roster_id]} for row in season.preseason]
-
-    if season.draft is not None:
-        draft_template = env.get_template("draft.html")
-        draft_html = draft_template.render(
-            **common,
-            draft=season.draft,
-            teams=season.teams,
-            asset_prefix="",
+    for path, template, ctx in pages:
+        html = env.get_template(template).render(
+            **common, asset_prefix="../" * path.count("/"), **ctx
         )
-        (output_dir / "draft.html").write_text(draft_html)
-
-    if season.preseason:
-        week0_template = env.get_template("week0.html")
-        html = week0_template.render(**common, asset_prefix="../", preseason_rows=preseason_rows)
-        (weeks_dir / "week-0.html").write_text(html)
-
-    if _season_is_complete(season):
-        recap_template = env.get_template("season_recap.html")
-        html = recap_template.render(
-            **common, asset_prefix="../", teams=season.teams, records=season.season_board.records
-        )
-        (weeks_dir / f"week-{season.playoff_week_start}.html").write_text(html)
-
-    if rivalries:
-        rivalry_template = env.get_template("rivalries.html")
-        html = rivalry_template.render(
-            **common,
-            asset_prefix="",
-            managers=rivalries,
-            by_id={m.owner_id: m for m in rivalries},
-            highlights=rivalry_highlights(rivalries),
-        )
-        (output_dir / "rivalries.html").write_text(html)
-
-    if _has_trades_page(season):
-        trades_template = env.get_template("trades.html")
-        html = trades_template.render(
-            **common, **_trades_context(season), teams=season.teams, asset_prefix=""
-        )
-        (output_dir / "trades.html").write_text(html)
-
+        (output_dir / path).write_text(html)
     if season.roster_report is not None:
-        html = env.get_template("rosters.html").render(
-            **common, report=season.roster_report, teams=season.teams, asset_prefix=""
-        )
-        (output_dir / "rosters.html").write_text(html)
         (output_dir / "rosters.json").write_text(build_rosters_json(season))
-
-    how_template = env.get_template("how_it_works.html")
-    html = how_template.render(**common, **_how_it_works_context(season), asset_prefix="")
-    (output_dir / "how-it-works.html").write_text(html)
-
-    if not season.weeks:
-        template = env.get_template("landing.html")
-        html = template.render(**common, asset_prefix="", preseason_rows=preseason_rows)
-        (output_dir / "index.html").write_text(html)
-        if season.provisional_week_summary is not None:
-            ctx = _week_context(
-                season, season.provisional_week_summary, asset_prefix="../", is_index=False
-            )
-            html = week_template.render(**common, **ctx)
-            (weeks_dir / f"week-{season.provisional_week_summary.week}.html").write_text(html)
-        return
-
-    for wk in season.weeks:
-        ctx = _week_context(season, wk, asset_prefix="../", is_index=False)
-        html = week_template.render(**common, **ctx)
-        (weeks_dir / f"week-{wk.week}.html").write_text(html)
-
-    if season.provisional_week_summary is not None:
-        ctx = _week_context(
-            season, season.provisional_week_summary, asset_prefix="../", is_index=False
-        )
-        html = week_template.render(**common, **ctx)
-        (weeks_dir / f"week-{season.provisional_week_summary.week}.html").write_text(html)
-
-    latest = season.weeks[-1]
-    ctx = _week_context(season, latest, asset_prefix="", is_index=True)
-    html = week_template.render(**common, **ctx)
-    (output_dir / "index.html").write_text(html)
-
-    season_template = env.get_template("season.html")
-    season_html = season_template.render(
-        **common,
-        season=season,
-        teams=season.teams,
-        board=season.season_board,
-        asset_prefix="",
-    )
-    (output_dir / "season.html").write_text(season_html)

@@ -20,7 +20,7 @@
   --surface-2: #f7f8fa;
   --text-primary: #111318;
   --text-secondary: #4b505b;
-  --text-muted: #80858f;
+  --text-muted: #676c75;
   --border: rgba(17, 19, 24, 0.09);
   --gridline: #e6e8ec;
   --accent: #2563eb;
@@ -28,16 +28,23 @@
   --link: #1d5bd8;
   --good: #0a7a32;
   --good-soft: rgba(10, 122, 50, 0.1);
-  --bad: #cf3535;
-  --bad-soft: rgba(207, 53, 53, 0.1);
+  --bad: #c0302f;
+  --bad-soft: rgba(192, 48, 47, 0.1);
+  --warn: #b45309;
   --gold: #c99a06;
+  --gold-ink: #866400;
+  --gold-soft: rgba(201, 154, 6, 0.16);
   --silver: #8f98a3;
-  --bronze: #b06a35;
+  --bronze: #c47a40;
+  --medal-ink: #111318;
+  --meter-track: #e6e8ec;
+  --scroll-shade: rgba(16, 24, 40, 0.18);
   --header-bg: #0f172a;
   --header-text: #f8fafc;
   --header-muted: #94a3b8;
   --header-hover: rgba(255, 255, 255, 0.08);
   --header-raised: #1e2638;
+  --header-h: 7rem; /* sticky header height, for scrolling to #anchors */
   --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.06);
   --radius: 14px;
   --radius-sm: 8px;
@@ -45,6 +52,9 @@
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+/* Dark theme, written twice: once for "follow the OS" and once for the
+   theme button's explicit choice. KEEP THE TWO BLOCKS IN SYNC; a test
+   (test_dark_tokens_in_sync) fails if they drift. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
@@ -63,14 +73,20 @@
     --good-soft: rgba(47, 191, 95, 0.14);
     --bad: #f07272;
     --bad-soft: rgba(240, 114, 114, 0.14);
+    --warn: #f59e0b;
     --gold: #e0b42a;
+    --gold-ink: #e0b42a;
+    --gold-soft: rgba(224, 180, 42, 0.16);
     --silver: #a4adb8;
     --bronze: #cf8a52;
+    --medal-ink: #111318;
+    --meter-track: #343a48;
+    --scroll-shade: rgba(0, 0, 0, 0.7);
     --header-bg: #10131b;
     --header-text: #f3f4f6;
     --header-muted: #8b909a;
     --header-hover: rgba(255, 255, 255, 0.07);
-  --header-raised: #1d212c;
+    --header-raised: #1d212c;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   }
 }
@@ -91,9 +107,15 @@
   --good-soft: rgba(47, 191, 95, 0.14);
   --bad: #f07272;
   --bad-soft: rgba(240, 114, 114, 0.14);
+  --warn: #f59e0b;
   --gold: #e0b42a;
+  --gold-ink: #e0b42a;
+  --gold-soft: rgba(224, 180, 42, 0.16);
   --silver: #a4adb8;
   --bronze: #cf8a52;
+  --medal-ink: #111318;
+  --meter-track: #343a48;
+  --scroll-shade: rgba(0, 0, 0, 0.7);
   --header-bg: #10131b;
   --header-text: #f3f4f6;
   --header-muted: #8b909a;
@@ -106,7 +128,7 @@
 
 * { box-sizing: border-box; }
 
-html { -webkit-text-size-adjust: 100%; scroll-padding-top: 7rem; }
+html { -webkit-text-size-adjust: 100%; scroll-padding-top: var(--header-h); }
 
 body {
   margin: 0;
@@ -120,6 +142,20 @@ a { color: var(--link); text-decoration-thickness: 1px; text-underline-offset: 2
 a:hover { text-decoration-thickness: 2px; }
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.site-main:focus-visible { outline: none; } /* focused by the skip link */
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -3rem;
+  z-index: 20;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--link);
+  font-weight: 600;
+}
+.skip-link:focus { top: 0.5rem; }
 
 h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
 
@@ -194,6 +230,21 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
 }
 .site-nav a:hover { color: var(--header-text); background: var(--header-hover); }
 .site-nav a[aria-current="page"] { color: var(--header-text); background: rgba(255, 255, 255, 0.14); }
+.site-nav a:focus-visible, .page-toc a:focus-visible { outline-offset: -2px; }
+
+@media (max-width: 600px) {
+  /* fade the right edge so it's clear the links scroll */
+  .site-nav {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+  }
+}
+@media (max-width: 480px) {
+  .site-title { display: none; } /* the mark still links home; pickers need the room */
+}
+@media (max-height: 500px) {
+  .site-header { position: static; } /* landscape phones: don't pin a third of the screen */
+}
 
 /* Selects in the dark header bar. */
 .picker {
@@ -211,15 +262,8 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
   cursor: pointer;
 }
 .picker option { color: #111318; background: #fff; }
-/* The week picker stays pinned at the right while the nav links scroll. */
-.week-picker {
-  position: sticky;
-  right: 0;
-  margin-left: auto;
-  background-color: var(--header-raised);
-  /* fade the links scrolling under it, and cover the nav's right padding */
-  box-shadow: -1rem 0 0.75rem var(--header-bg), 1rem 0 0 0.5rem var(--header-bg);
-}
+.picker[hidden] { display: none; }
+.week-picker { background-color: var(--header-raised); }
 
 .theme-toggle {
   display: grid;
@@ -277,19 +321,34 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
 }
 .lede { font-size: 1rem; color: var(--text-secondary); max-width: 46rem; margin: 0.25rem 0 0; }
 
-.pager { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+/* Previous/next week, as one joined control. */
+.pager { display: flex; margin-top: 0.75rem; }
 .pager a {
-  padding: 0.35rem 0.8rem;
-  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow);
   font-size: 0.88rem;
   font-weight: 550;
   text-decoration: none;
+  white-space: nowrap;
 }
 .pager a:hover { background: var(--surface-2); }
-.pager-next { margin-left: auto; }
+.pager a:first-child { border-radius: 999px 0 0 999px; }
+.pager a:last-child { border-radius: 0 999px 999px 0; }
+.pager a:only-child { border-radius: 999px; }
+.pager a + a { border-left: 0; }
+.site-main > .pager { margin: 0 0 1.25rem; justify-content: center; }
+@media (min-width: 600px) {
+  .page-head:has(> .pager) {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: 1rem;
+    align-items: end;
+  }
+  .page-head:has(> .pager) > :not(.pager) { grid-column: 1; }
+  .page-head > .pager { grid-column: 2; grid-row: 1 / span 3; margin: 0; }
+}
 
 /* Jump links at the top of long pages. */
 .page-toc {
@@ -313,6 +372,10 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
   white-space: nowrap;
 }
 .page-toc a:hover { background: var(--accent); color: #fff; }
+.page-toc-wrap { flex-wrap: wrap; overflow: visible; }
+@media (min-width: 860px) {
+  .page-toc { flex-wrap: wrap; overflow: visible; }
+}
 
 /* Every top-level section is a card. */
 .site-main > section,
@@ -325,7 +388,11 @@ h1, h2, h3 { line-height: 1.2; letter-spacing: -0.01em; }
   margin: 0 0 1.25rem;
   min-width: 0;
 }
+.site-main > section.bare { background: none; border: 0; box-shadow: none; padding: 0; }
 section h2 { font-size: 1.15rem; font-weight: 720; margin: 0 0 0.6rem; }
+h2 .team-name { font-weight: inherit; }
+/* Keep prose to a readable line length. */
+section > p, section > ul:not([class]), section > ol:not([class]), section > dl.glossary { max-width: 72ch; }
 section h3 { font-size: 1rem; margin: 1.25rem 0 0.35rem; }
 section > :last-child { margin-bottom: 0; }
 
@@ -339,12 +406,14 @@ section > :last-child { margin-bottom: 0; }
 @media (min-width: 860px) {
   .card-row { grid-template-columns: 1fr 1fr; }
 }
+@media (min-width: 720px) {
+  .card-row.rosters { grid-template-columns: 1fr 1fr; }
+}
 
 @media (max-width: 600px) {
   .site-main { padding: 1rem 0.75rem; }
   .site-main > section, .card-row > section { padding: 0.9rem 0.85rem 1rem; border-radius: 12px; }
   .page-title { font-size: 1.45rem; }
-  html { scroll-padding-top: 6.5rem; }
 }
 
 /* 4. Components --------------------------------------------------------- */
@@ -366,7 +435,7 @@ section > :last-child { margin-bottom: 0; }
   white-space: nowrap;
 }
 .badge-provisional { background: var(--accent-soft); color: var(--link); }
-.badge-playoff { background: rgba(201, 154, 6, 0.16); color: var(--gold); }
+.badge-playoff { background: var(--gold-soft); color: var(--gold-ink); }
 
 /* Award tiles: label, big number, who. */
 .awards-grid {
@@ -375,6 +444,7 @@ section > :last-child { margin-bottom: 0; }
   gap: 0.75rem;
   margin: 0 0 1.25rem;
 }
+.bare .awards-grid { margin: 0; }
 @media (max-width: 600px) {
   .awards-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 }
@@ -393,10 +463,11 @@ section > :last-child { margin-bottom: 0; }
   position: absolute;
   inset: 0 auto 0 0;
   width: 4px;
-  background: var(--award-accent, var(--accent));
+  background: var(--award-accent, transparent);
 }
 .award-good { --award-accent: var(--good); }
 .award-bad { --award-accent: var(--bad); }
+.award-warn { --award-accent: var(--warn); }
 .award-card h3 {
   display: flex;
   align-items: center;
@@ -412,16 +483,15 @@ section > :last-child { margin-bottom: 0; }
 .award-teams { margin: 0.2rem 0 0; color: var(--text-secondary); font-size: 0.88rem; }
 .award-good .award-value { color: var(--good); }
 .award-bad .award-value { color: var(--bad); }
+.award-warn .award-value { color: var(--warn); }
 
 /* Tables. Wide ones scroll sideways inside their card, team column pinned. */
 .table-scroll {
   overflow-x: auto;
-  margin: 0 -0.25rem;
-  padding: 0 0.25rem;
   /* A shadow on whichever edge has more table to scroll to. */
   background:
     linear-gradient(to left, var(--surface) 40%, transparent) right / 2rem 100% no-repeat local,
-    radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, 0.16), transparent) right / 0.8rem 100% no-repeat scroll;
+    radial-gradient(farthest-side at 100% 50%, var(--scroll-shade), transparent) right / 1.1rem 100% no-repeat scroll;
 }
 table {
   width: 100%;
@@ -451,18 +521,43 @@ tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--surface-2); }
 th.num, td.num { text-align: right; }
 td.wrap { white-space: normal; min-width: 14rem; }
+@media (max-width: 900px) {
+  th, td { padding-inline: 0.45rem; }
+  td.wrap { min-width: 12rem; }
+}
+@media (max-width: 600px) {
+  /* Pinned team names wrap to two lines rather than eat the screen. */
+  .team-cell .team-name {
+    display: inline-block;
+    width: max-content;
+    max-width: 8rem;
+    white-space: normal;
+    overflow-wrap: break-word;
+    line-height: 1.2;
+    vertical-align: middle;
+  }
+  .team-cell .team-mark { width: 1.35rem; height: 1.35rem; margin-right: 0.4rem; font-size: 0.65rem; }
+  .team-cell .rank { width: 1.5rem; height: 1.4rem; margin-right: 0.4rem; font-size: 0.72rem; }
+}
 .total-row td { font-weight: 700; border-top: 2px solid var(--gridline); }
 tr.group-start td { border-top: 1px solid var(--gridline); }
 
 /* A team's name with its avatar, or its initial on its color. As a row's
    first cell it stays put while the rest of a wide table scrolls. */
-td.team-cell:first-child {
+td.team-cell:first-child,
+table:has(> tbody > tr > td.team-cell:first-child) > thead th:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
-  background: var(--surface);
+  box-shadow: 1px 0 0 var(--gridline);
 }
+td.team-cell:first-child { background: var(--surface); }
+table:has(> tbody > tr > td.team-cell:first-child) > thead th:first-child { z-index: 2; }
+tbody tr:hover td.team-cell:first-child { background: var(--surface-2); }
 .team-cell, .team-inline { white-space: nowrap; }
+/* Long team names in card titles wrap instead of widening the page. */
+.section-head h2 .team-inline { white-space: normal; }
+.section-head h2 .team-inline .team-name { min-width: 0; }
 .team-cell .rank { margin-right: 0.6rem; }
 .team-inline { display: inline-flex; align-items: center; gap: 0.45rem; vertical-align: middle; }
 .team-mark {
@@ -473,6 +568,7 @@ td.team-cell:first-child {
   height: 1.6rem;
   margin-right: 0.5rem;
   border-radius: 50%;
+  --team: var(--team-l);
   background: var(--team);
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--team);
   color: #fff;
@@ -482,28 +578,25 @@ td.team-cell:first-child {
   flex-shrink: 0;
   overflow: hidden;
 }
+/* Marks carry both palettes inline (--team-l, --team-d); dark mode picks
+   the dark one. Kept outside the token blocks: these aren't tokens. */
+:root[data-theme="dark"] .team-mark { --team: var(--team-d); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .team-mark { --team: var(--team-d); }
+}
 .team-inline .team-mark { margin-right: 0; }
 .team-mark .team-avatar { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .team-name { vertical-align: middle; font-weight: 550; }
 .team-name a { color: inherit; text-decoration: none; }
 .team-name a:hover { color: var(--link); text-decoration: underline; }
-.team-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  vertical-align: middle;
-}
 td .badge { margin-left: 0.4rem; }
 
 /* Rank numbers; the podium gets medal colors. */
 .rank {
   display: inline-grid;
   place-items: center;
-  min-width: 1.6rem;
+  width: 1.9rem;
   height: 1.6rem;
-  padding: 0 0.3rem;
   border-radius: 999px;
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -511,9 +604,10 @@ td .badge { margin-left: 0.4rem; }
   font-weight: 700;
   color: var(--text-secondary);
 }
-.rank-1 { background: var(--gold); border-color: transparent; color: #fff; }
-.rank-2 { background: var(--silver); border-color: transparent; color: #fff; }
-.rank-3 { background: var(--bronze); border-color: transparent; color: #fff; }
+.rank-1 { background: var(--gold); }
+.rank-2 { background: var(--silver); }
+.rank-3 { background: var(--bronze); }
+.rank-1, .rank-2, .rank-3 { border-color: transparent; color: var(--medal-ink); }
 
 .move { display: inline-block; min-width: 2.2rem; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700; text-align: center; }
 .move.up { background: var(--good-soft); }
@@ -527,7 +621,7 @@ td .badge { margin-left: 0.4rem; }
   height: 0.4rem;
   margin-right: 0.5rem;
   border-radius: 999px;
-  background: var(--gridline);
+  background: var(--meter-track);
   vertical-align: middle;
   overflow: hidden;
 }
@@ -596,11 +690,61 @@ tbody tr:hover td.pos-worst { background: var(--bad-soft); }
   .chart-container.chart-tall { height: 380px; }
 }
 .chart-hint { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
+/* No JS or no Chart.js: hide what would be blank. */
+.no-charts .chart-block, .no-charts .chart-only, .no-charts .chart-pick { display: none; }
+.chart-key { margin: 0 0 0.4rem; font-size: 0.8rem; }
+.key { display: inline-block; width: 0.7rem; height: 0.7rem; border-radius: 2px; vertical-align: middle; margin: 0 0.3rem 0 0.6rem; }
+.key:first-child { margin-left: 0; }
+.key-won { background: var(--accent); }
+.key-lost { background: var(--text-muted); opacity: 0.45; }
+.chart-pick { display: inline-flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; margin-bottom: 0.5rem; }
+.chart-pick[hidden] { display: none; }
+.chart-pick select {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+/* Playoff odds: dashed rules under the last bye seed and the last playoff seed. */
+tr.cut-line td { border-bottom: 2px dashed var(--text-muted); }
+tr.bye-line td { border-bottom: 1px dashed var(--text-muted); }
+
+/* Tables whose cells hold sentences: on phones each row becomes a block,
+   numbers labelled from data-label, the text below at full width. */
+.swap { display: block; }
+@media (max-width: 600px) {
+  .table-stack thead { display: none; }
+  .table-stack, .table-stack tbody { display: block; }
+  .table-stack tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.25rem 0.75rem;
+    padding: 0.65rem 0.1rem;
+    border-bottom: 1px solid var(--gridline);
+  }
+  .table-stack tbody tr:last-child { border-bottom: 0; }
+  .table-stack td { display: block; padding: 0; border: 0; white-space: normal; min-width: 0; text-align: left; }
+  .table-stack td.team-cell, .table-stack td.wrap { grid-column: 1 / -1; position: static; box-shadow: none; }
+  .table-stack td.team-cell .team-name { max-width: none; }
+  .table-stack tbody tr:hover td { background: none; }
+  .table-stack td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+}
 
 /* Expandable rows: rivalries, value boards, claims. */
-.rivalry, .fold { border-bottom: 1px solid var(--gridline); }
-.rivalry:last-child, .fold:last-child { border-bottom: 0; }
-.rivalry summary, .fold summary {
+:is(.rivalry, .fold) { border-bottom: 1px solid var(--gridline); }
+:is(.rivalry, .fold):last-child { border-bottom: 0; }
+:is(.rivalry, .fold) summary {
   cursor: pointer;
   padding: 0.65rem 0.25rem;
   font-weight: 600;
@@ -610,9 +754,9 @@ tbody tr:hover td.pos-worst { background: var(--bad-soft); }
   list-style: none;
   border-radius: var(--radius-sm);
 }
-.rivalry summary:hover, .fold summary:hover { background: var(--surface-2); }
-.rivalry summary::-webkit-details-marker, .fold summary::-webkit-details-marker { display: none; }
-.rivalry summary::after, .fold summary::after {
+:is(.rivalry, .fold) summary:hover { background: var(--surface-2); }
+:is(.rivalry, .fold) summary::-webkit-details-marker { display: none; }
+:is(.rivalry, .fold) summary::after {
   content: "";
   margin-left: auto;
   width: 0.5rem;
@@ -624,8 +768,11 @@ tbody tr:hover td.pos-worst { background: var(--bad-soft); }
   flex-shrink: 0;
   margin-right: 0.35rem;
 }
-.rivalry[open] summary::after, .fold[open] summary::after { transform: rotate(45deg); }
-.rivalry .table-scroll, .fold .table-scroll { margin-bottom: 0.9rem; }
+:is(.rivalry, .fold)[open] summary::after { transform: rotate(45deg); }
+:is(.rivalry, .fold) .table-scroll { margin-bottom: 0.9rem; }
+@media (prefers-reduced-motion: reduce) {
+  :is(.rivalry, .fold) summary::after { transition: none; }
+}
 .summary-aside { margin-left: auto; color: var(--text-muted); font-weight: 500; font-size: 0.85rem; }
 summary:has(.summary-aside)::after { margin-left: 0.75rem; }
 
@@ -642,6 +789,30 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
   box-shadow: var(--shadow);
 }
 .btn:hover { background: var(--accent-soft); }
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Touch screens: bigger targets for everything tapped often. */
+@media (pointer: coarse) {
+  :root { --header-h: 7.75rem; }
+  .site-nav a, .picker { padding-block: 0.55rem; }
+  .theme-toggle { width: 2.5rem; height: 2.5rem; }
+  .page-toc a { padding: 0.6rem 0.9rem; }
+  .pager a { padding: 0.6rem 1rem; }
+  .trade-chip { padding: 0.6rem 0.85rem; }
+  .section-head a, .team-name a { display: inline-block; padding-block: 0.6rem; margin-block: -0.6rem; }
+}
 
 /* 5. Pages -------------------------------------------------------------- */
 
@@ -670,18 +841,32 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
   color: var(--header-text);
 }
 .landing h1 { font-size: 2rem; margin: 0 0 0.5rem; }
-.landing p { margin: 0; color: var(--header-muted); font-size: 1.05rem; }
+.landing p { margin: 0; color: rgba(248, 250, 252, 0.85); font-size: 1.05rem; }
 
 /* Draft: the letter grade carries the color. */
 .grade { font-size: 2rem; }
 .grade-a { color: var(--good); }
 .grade-b { color: var(--accent); }
-.grade-c { color: var(--gold); }
-.grade-d, .grade-f { color: var(--bad); }
-.award-card.grade-card-a { --award-accent: var(--good); }
-.award-card.grade-card-b { --award-accent: var(--accent); }
-.award-card.grade-card-c { --award-accent: var(--gold); }
-.award-card.grade-card-d, .award-card.grade-card-f { --award-accent: var(--bad); }
+.grade-c { color: var(--warn); }
+.grade-d { color: var(--bad); }
+/* A tile titled with a team (draft grades, trade calculator) reads as a name. */
+.award-card h3:has(> .team-inline) {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+.grade-stats {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  justify-content: start;
+  gap: 0 1rem;
+  margin: 0.35rem 0 0.25rem;
+  font-variant-numeric: tabular-nums;
+}
+.grade-stats dt { font-size: 0.72rem; color: var(--text-muted); }
+.grade-stats dd { margin: 0; font-weight: 650; }
 
 /* How it works. */
 .formula {
@@ -716,9 +901,11 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
   grid-template-columns: 1fr;
   gap: 0.75rem;
 }
+.trade-sides[hidden] { display: none; }
 .trade-side {
   background: var(--surface-2);
   border: 1px solid var(--border);
+  border-top: 3px solid var(--team, var(--border));
   border-radius: 12px;
   padding: 0.85rem;
   min-width: 0;
@@ -806,6 +993,36 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
   overflow: hidden;
   background: var(--gridline);
 }
+.trade-bar-legend { display: flex; justify-content: space-between; gap: 1rem; margin-top: 0.3rem; font-size: 0.8rem; color: var(--text-secondary); }
+/* On phones, the verdict follows you down the rosters. */
+.trade-summary { display: none; }
+@media (max-width: 639px) {
+  .trade-summary:not(:empty) {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: 0.75rem -0.85rem 0;
+    padding: 0.6rem 0.85rem;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -6px 12px -6px rgba(0, 0, 0, 0.15);
+    font-weight: 650;
+    font-size: 0.9rem;
+  }
+  .trade-summary button {
+    flex: 1;
+    font: inherit;
+    padding: 0.3rem 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+  .trade-summary .trade-bar { margin: 0; }
+  .trade-roster { max-height: min(22rem, 50vh); }
+}
 .trade-teams {
   display: grid;
   grid-template-columns: 1fr;
@@ -821,6 +1038,6 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
 .trade-changes li { margin-bottom: 0.2rem; }
 .trade-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; font-size: 0.9rem; margin: 0.9rem 0 0; }
 .trade-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }
-.trade-history { margin-top: 1rem; }
-.trade-history:first-of-type { margin-top: 0; }
+.trade-history + .trade-history { margin-top: 1rem; }
+.badge-verdict { background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border); text-transform: none; letter-spacing: 0; font-size: 0.78rem; }
 .trade-history h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; }

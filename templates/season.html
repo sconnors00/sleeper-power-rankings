@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui with context %}
 {% set active_page = "season" %}
+{% set uses_charts = true %}
 {% set acq = season.acquisitions %}
 {% set has_pickups = acq and acq.pickups and acq.pickups[0].player.points > 0 %}
 {% block title %}Season &middot; {{ league_name }}{% endblock %}
@@ -22,23 +23,20 @@
 
 {% if season.playoff_odds %}
 <section id="playoff-odds">
-  <div class="section-head">
-    <h2>Playoff odds</h2>
-    <a href="how-it-works.html#playoff-odds">How this works</a>
-  </div>
-  <p class="note">From {{ "{:,}".format(season.playoff_odds_sims) }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}.</p>
+  {{ ui.section_head("Playoff odds", how="playoff-odds") }}
+  <p class="note">From {{ "{:,}".format(season.playoff_odds_sims) }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}. Dashed lines mark the {% if season.playoff_byes %}bye and {% endif %}playoff cut.</p>
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Team</th><th class="num">Record</th><th class="num">Proj. wins</th><th>Playoffs</th>{% if season.playoff_byes %}<th class="num">Bye</th>{% endif %}<th class="num">#1 seed</th></tr></thead>
+    <thead><tr><th>Team</th><th>Playoffs</th>{% if season.playoff_byes %}<th class="num">Bye</th>{% endif %}<th class="num">#1 seed</th><th class="num">Record</th><th class="num">Proj. wins</th></tr></thead>
     <tbody>
       {% for r in season.playoff_odds %}
-      <tr>
+      <tr{% if loop.index == season.playoff_teams %} class="cut-line"{% elif season.playoff_byes and loop.index == season.playoff_byes %} class="bye-line"{% endif %}>
         {{ ui.team_cell(teams[r.roster_id]) }}
-        <td class="num">{{ r.record }}</td>
-        <td class="num">{{ "%.1f" | format(r.projected_wins) }}</td>
-        <td><strong>{{ ui.meter(r.playoff_pct, r.playoff_pct | pct, "good" if r.playoff_pct >= 0.5 else "") }}</strong></td>
+        <td><strong>{{ ui.meter(r.playoff_pct, r.playoff_pct | pct) }}</strong></td>
         {% if season.playoff_byes %}<td class="num">{{ r.bye_pct | pct }}</td>{% endif %}
         <td class="num">{{ r.top_seed_pct | pct }}</td>
+        <td class="num">{{ r.record }}</td>
+        <td class="num">{{ "%.1f" | format(r.projected_wins) }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -49,14 +47,17 @@
 
 <section id="leaders">
   <h2>Points-for leaderboard</h2>
+  <p class="note">&#128081; counts the weeks each team was the league's top scorer.</p>
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Team</th><th class="num">PF</th><th class="num">Avg</th><th class="num">Best week</th><th class="num">Worst week</th></tr></thead>
+    <thead><tr><th>Team</th><th class="num">PF</th><th class="num">Crowns</th><th class="num">Avg</th><th class="num">Best week</th><th class="num">Worst week</th></tr></thead>
     <tbody>
       {% for row in board.pf_leaderboard %}
+      {% set crowns = board.crown_counts.get(row.roster_id, 0) %}
       <tr>
         {{ ui.team_cell(teams[row.roster_id], rank=loop.index) }}
         <td class="num"><strong>{{ row.pf | fmt2 }}</strong></td>
+        <td class="num">{% if crowns %}&#128081; {{ crowns }}{% else %}<span class="note-inline">&mdash;</span>{% endif %}</td>
         <td class="num">{{ row.avg | fmt2 }}</td>
         <td class="num"><span class="note-inline">Wk {{ row.best_week }}</span> {{ row.best_week_score | fmt2 }}</td>
         <td class="num"><span class="note-inline">Wk {{ row.worst_week }}</span> {{ row.worst_week_score | fmt2 }}</td>
@@ -67,8 +68,7 @@
   </div>
 </section>
 
-<div class="card-row">
-<section>
+<section id="log">
   <h2>Weekly log</h2>
   <div class="table-scroll">
   <table class="data-table">
@@ -76,7 +76,7 @@
     <tbody>
       {% for entry in board.log %}
       <tr>
-        <td><a href="{{ week_url(entry.week) }}">Week {{ entry.week }}</a></td>
+        <td><a href="{{ asset_prefix }}{{ week_url(entry.week) }}">Week {{ entry.week }}</a></td>
         <td>{% for rid in entry.top_scorer_roster_ids %}{{ ui.team_inline(teams[rid]) }}{% if not loop.last %} {% endif %}{% endfor %}</td>
         <td class="num">{{ entry.top_score | fmt2 }}</td>
       </tr>
@@ -86,87 +86,62 @@
   </div>
 </section>
 
-<section>
-  <h2>Crown count</h2>
-  <p class="note">Weeks as the league's top scorer.</p>
-  <div class="table-scroll">
-  <table class="data-table">
-    <thead><tr><th>Team</th><th class="num">Crowns</th></tr></thead>
-    <tbody>
-      {% for rid, count in board.crown_counts.items() | sort(attribute="1", reverse=True) %}
-      <tr>{{ ui.team_cell(teams[rid]) }}<td class="num">{{ "&#128081;" | safe if count }} {{ count }}</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<section id="records" class="bare">
+  <h2>Season records</h2>
+  <div class="awards-grid">
+    {{ ui.score_record("Highest team score", board.records.highest_team_score, "good") }}
+    {{ ui.score_record("Lowest team score", board.records.lowest_team_score, "bad") }}
+    {{ ui.player_record("Highest starter", board.records.highest_starter, "good") }}
+    {{ ui.player_record("Highest bench player", board.records.highest_bench_player) }}
   </div>
 </section>
-</div>
 
-<div id="records" class="awards-grid">
-  {% call ui.award("Highest team score", board.records.highest_team_score[2] | fmt2, "good") %}
-  <p class="award-teams">{% for rid in board.records.highest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ board.records.highest_team_score[1] }})</p>
-  {% endcall %}
-  {% call ui.award("Lowest team score", board.records.lowest_team_score[2] | fmt2, "bad") %}
-  <p class="award-teams">{% for rid in board.records.lowest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ board.records.lowest_team_score[1] }})</p>
-  {% endcall %}
-  {% set pairs, wk = board.records.highest_starter %}
-  {% call ui.award("Highest starter", pairs[0][1].points | fmt2 if pairs else "") %}
-  <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
-  {% endcall %}
-  {% set pairs, wk = board.records.highest_bench_player %}
-  {% call ui.award("Highest bench player", pairs[0][1].points | fmt2 if pairs else "") %}
-  <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
-  {% endcall %}
-</div>
-
-<section id="charts" class="chart-section">
+<section id="charts" class="chart-only">
   <h2>Weekly points by team</h2>
-  <div class="chart-container chart-tall"><canvas id="chart-weekly-points"></canvas></div>
-  <p class="chart-hint">Hover a line to pick out a team; tap a name in the legend to show only that team.</p>
+  <label class="chart-pick" hidden>Highlight
+    <select id="highlight-team">
+      {% for t in teams.values() | sort(attribute="name") %}
+      <option value="{{ t.roster_id }}">{{ t.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {{ ui.chart("chart-weekly-points", "Line chart of every team's points by week, one team highlighted", tall=true,
+              hint="Dashed line: league average. Hover or tap a line to pick out another team.") }}
 </section>
 
 <div class="card-row">
-<section class="chart-section">
+<section class="chart-only">
   <h2>Weekly scoring spread</h2>
   <p class="note">Each week's lowest to highest score, with the median.</p>
-  <div class="chart-container"><canvas id="chart-scoring-spread"></canvas></div>
+  {{ ui.chart("chart-scoring-spread", "Range chart of each week's lowest, median and highest team score") }}
 </section>
 
-<section class="chart-section">
+<section class="chart-only">
   <h2>Luck</h2>
-  <p class="note">Above the line: winning more than your scores deserve.</p>
-  <div class="chart-container"><canvas id="chart-luck"></canvas></div>
+  <p class="note">Right of zero: won more games than their scores earned.</p>
+  {{ ui.chart("chart-luck", "Bar chart of wins above or below what each team's scores earned", tall=true) }}
 </section>
 </div>
 
-<div class="card-row">
-<section class="chart-section">
+<section class="chart-only">
   <h2>Points for vs. points against</h2>
-  <div class="chart-container chart-tall"><canvas id="chart-pf-pa"></canvas></div>
+  {{ ui.chart("chart-pf-pa", "Bar chart of each team's points for and points against", tall=true) }}
 </section>
-
-<section class="chart-section">
-  <h2>Points left on bench</h2>
-  <div class="chart-container chart-tall"><canvas id="chart-bench"></canvas></div>
-</section>
-</div>
 
 {% if board.lineup_leaderboard %}
+{% set most_missed = board.lineup_leaderboard | map(attribute="left_on_bench") | max %}
 <section id="lineups">
-  <div class="section-head">
-    <h2>Lineup efficiency</h2>
-    <a href="how-it-works.html#lineups">How this works</a>
-  </div>
-  <p class="note">How close each manager's lineups came to the best possible lineup from their own roster, all season.</p>
+  {{ ui.section_head("Lineup efficiency", how="lineups") }}
+  <p class="note">How close each manager's lineups came to the best possible lineup from their own roster, all season. Missed points are what the best lineup would have added.</p>
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Team</th><th>Efficiency</th><th class="num">Missed points</th><th class="num">Perfect weeks</th></tr></thead>
+    <thead><tr><th>Team</th><th class="num">Efficiency</th><th>Missed points</th><th class="num">Perfect weeks</th></tr></thead>
     <tbody>
       {% for r in board.lineup_leaderboard %}
       <tr>
         {{ ui.team_cell(teams[r.roster_id], rank=loop.index) }}
-        <td>{{ ui.meter(r.efficiency, "%.1f%%" | format(r.efficiency * 100)) }}</td>
-        <td class="num">{{ r.left_on_bench | fmt2 }}</td>
+        <td class="num">{{ "%.1f%%" | format(r.efficiency * 100) }}</td>
+        <td>{{ ui.meter(r.left_on_bench / most_missed if most_missed else 0, r.left_on_bench | fmt2, "bad") }}</td>
         <td class="num">{{ r.perfect_weeks }} of {{ r.weeks }}</td>
       </tr>
       {% endfor %}
@@ -178,22 +153,19 @@
 
 {% if has_pickups %}
 <section id="pickups">
-  <div class="section-head">
-    <h2>Best pickups</h2>
-    <a href="how-it-works.html#pickups">How this works</a>
-  </div>
+  {{ ui.section_head("Best pickups", how="pickups") }}
   <p class="note">Waiver and free-agent adds ranked by points scored in the new team's starting lineup since the move.</p>
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Player</th><th>Team</th><th>Added</th><th class="num">Starts</th><th class="num">Points</th></tr></thead>
+    <thead><tr><th>Player</th><th class="num">Points</th><th class="num">Starts</th><th>Team</th><th>Added</th></tr></thead>
     <tbody>
       {% for a in acq.pickups if a.player.points > 0 %}{% if loop.index <= 10 %}
       <tr>
         <td>{{ a.player.name }} <span class="note-inline">{{ a.player.position }}</span></td>
+        <td class="num"><strong>{{ a.player.points | fmt2 }}</strong></td>
+        <td class="num">{{ a.starts }}</td>
         {{ ui.team_cell(teams[a.roster_id]) }}
         <td>Wk {{ a.week }} &middot; {% if a.move_type == "waiver" %}waiver{% if a.faab %} (${{ a.faab }}){% endif %}{% else %}free agent{% endif %}</td>
-        <td class="num">{{ a.starts }}</td>
-        <td class="num"><strong>{{ a.player.points | fmt2 }}</strong></td>
       </tr>
       {% endif %}{% endfor %}
     </tbody>
@@ -205,7 +177,7 @@
 {% if acq and acq.trades %}
 <section id="trades">
   <h2>Trades</h2>
-  <p class="note">{{ acq.trades | length }} trade{{ "s" if acq.trades | length != 1 }} this season, each graded on the <a href="trades.html#history">Trades page</a>{% if season.trade_values %} next to the trade calculator{% endif %}.</p>
+  <p class="note">{{ acq.trades | length }} trade{{ "s" if acq.trades | length != 1 }} this season, each graded on the <a href="{{ asset_prefix }}trades.html#history">Trades page</a>{% if season.trade_values %} next to the trade calculator{% endif %}.</p>
 </section>
 {% endif %}
 

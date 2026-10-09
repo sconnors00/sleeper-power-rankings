@@ -1,14 +1,16 @@
 {% import "_macros.html" as ui with context %}
-{#- The nav, in order: (key, page, label, shown). A page template marks its
-    own entry active with {% set active_page = "<key>" %}. -#}
+{#- The nav, in order: (key, page, label). A page shows up only if this
+    season's build made it (`built`, from render_site's page list). A page
+    template marks its own entry with {% set active_page = "<key>" %}, and
+    sets uses_charts / uses_data to load Chart.js / data.js. -#}
 {% set nav = [
-  ("latest", "index.html", "Latest", true),
-  ("season", "season.html", "Season", has_season),
-  ("rosters", "rosters.html", "Rosters", has_rosters),
-  ("trades", "trades.html", "Trades", has_trades),
-  ("draft", "draft.html", "Draft", has_draft),
-  ("rivalries", "rivalries.html", "Rivalries", has_rivalries),
-  ("how", "how-it-works.html", "How it works", true),
+  ("latest", "index.html", "Latest"),
+  ("season", "season.html", "Season"),
+  ("rosters", "rosters.html", "Rosters"),
+  ("trades", "trades.html", "Trades"),
+  ("draft", "draft.html", "Draft"),
+  ("rivalries", "rivalries.html", "Rivalries"),
+  ("how", "how-it-works.html", "How it works"),
 ] %}
 <!doctype html>
 <html lang="en">
@@ -29,22 +31,35 @@
     if (e.target.classList && e.target.classList.contains("team-avatar")) e.target.remove();
   }, true);
 </script>
+<noscript><style>.chart-block, .chart-only, .chart-pick { display: none; }</style></noscript>
 <link rel="stylesheet" href="{{ asset_prefix }}static/style.css?v={{ asset_version }}">
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <header class="site-header">
   <div class="site-header-row">
-    <a class="site-brand" href="{{ asset_prefix }}index.html">
+    <a class="site-brand" href="{{ asset_prefix }}index.html" aria-label="{{ league_name }}">
       <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(-35 12 12)"><ellipse cx="12" cy="12" rx="10.5" ry="6.5"/><path d="M8 12h8M10 10.4v3.2M12 10.4v3.2M14 10.4v3.2"/></g></svg>
       <span class="site-title">{{ league_name }}</span>
     </a>
     <div class="site-tools">
+      {#- The pickers need JS to navigate, so they start hidden; without it the
+          week pager and the season page's weekly log still reach every week. #}
+      {% if all_weeks %}
+      <select class="picker week-picker" aria-label="Jump to week" data-nav hidden>
+        <option value="">Weeks&hellip;</option>
+        {% for w in all_weeks %}
+        <option value="{{ asset_prefix }}{{ week_url(w) }}"{% if w == current_week %} selected{% endif %}>{{ ui.week_label(w) }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
       {% if all_seasons | length > 1 %}
-      <select class="picker" aria-label="Season" onchange="if(this.value) window.location = this.value;">
+      <select class="picker" aria-label="Season" data-nav hidden>
         {% for y in all_seasons %}
         <option value="{{ asset_prefix }}{{ site_root_prefix }}{{ year_url(y) }}"{% if y == season_year %} selected{% endif %}>{{ y }}</option>
         {% endfor %}
       </select>
+      <noscript><span class="season-year">{{ season_year }}</span></noscript>
       {% else %}
       <span class="season-year">{{ season_year }}</span>
       {% endif %}
@@ -56,27 +71,23 @@
     </div>
   </div>
   <nav class="site-nav" aria-label="Pages">
-    {% for key, page, label, shown in nav if shown %}
+    {% for key, page, label in nav if page in built %}
     <a href="{{ asset_prefix }}{{ page }}"{% if key == active_page %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
-    {% if all_weeks %}
-    <select class="picker week-picker" aria-label="Jump to week" onchange="if(this.value) window.location = this.value;">
-      <option value="">Weeks&hellip;</option>
-      {% for w in all_weeks %}
-      <option value="{{ asset_prefix }}{{ week_url(w) }}"{% if w == current_week %} selected{% endif %}>{{ ui.week_label(w) }}</option>
-      {% endfor %}
-    </select>
-    {% endif %}
   </nav>
 </header>
-<main class="site-main">
+<main id="main" class="site-main" tabindex="-1">
 {% block content %}{% endblock %}
 </main>
 <footer class="site-footer">
   <p>{{ league_name }} &middot; {{ season_year }} &middot; built automatically from <a href="https://docs.sleeper.com" target="_blank" rel="noopener">Sleeper</a> league data &middot; <a href="{{ asset_prefix }}how-it-works.html">How it works</a></p>
 </footer>
+{% if uses_charts %}
 <script src="{{ chart_js_url }}" integrity="{{ chart_js_sri }}" crossorigin="anonymous"></script>
+{% endif %}
+{% if uses_charts or uses_data %}
 <script src="{{ asset_prefix }}data.js?v={{ asset_version }}"></script>
+{% endif %}
 <script src="{{ asset_prefix }}static/app.js?v={{ asset_version }}"></script>
 </body>
 </html>

@@ -1,11 +1,16 @@
 {#- Shared building blocks. Import with
     {% import "_macros.html" as ui with context %}
-  and change a component here once instead of in every template. -#}
+  and change a component here once instead of in every template.
+  "with context" lets macros read asset_prefix, teams, week_url, all_weeks
+  and recap_week from the page being rendered. -#}
 
-{# A team's (or manager's) badge: avatar when there is one, with the
-   team-color ring; the first letter shows if there's no avatar or it fails. #}
+{# --- Teams ------------------------------------------------------------- #}
+
+{# A team's (or manager's) badge: avatar when there is one, on a ring in the
+   team's color (the dark palette in dark mode); the first letter shows if
+   there's no avatar or it fails to load. #}
 {% macro mark(t, avatar=true) -%}
-<span class="team-mark" style="--team:{{ t.color }}" aria-hidden="true">{{ t.name[:1] | upper }}{% if avatar and t.avatar_url %}<img class="team-avatar" src="{{ t.avatar_url }}" alt="" loading="lazy">{% endif %}</span>
+<span class="team-mark" style="--team-l:{{ t.color }};--team-d:{{ t.color_dark or t.color }}" aria-hidden="true">{{ t.name[:1] | upper }}{% if avatar and t.avatar_url %}<img class="team-avatar" src="{{ t.avatar_url }}" alt="" loading="lazy">{% endif %}</span>
 {%- endmacro %}
 
 {# A rank number; the podium gets medal colors. #}
@@ -22,29 +27,7 @@
 
 {# The same badge and name inline, outside a table. #}
 {% macro team_inline(t) -%}
-<span class="team-inline">{{ mark(t) }}<span class="team-name">{{ t.name }}</span></span>
-{%- endmacro %}
-
-{# Week-over-week movement in the rankings: positive is up. #}
-{% macro movement(m) -%}
-{% if m is none or m == 0 %}<span class="move move-none">&mdash;</span>
-{%- elif m > 0 %}<span class="move up">&#9650;{{ m }}</span>
-{%- else %}<span class="move down">&#9660;{{ -m }}</span>{% endif %}
-{%- endmacro %}
-
-{# A 0-1 share drawn as a small bar, with the label printed next to it. #}
-{% macro meter(share, label, tone="") -%}
-<span class="meter{% if tone %} meter-{{ tone }}{% endif %}"><span style="width:{{ '%.1f' | format([[share, 0] | max, 1] | min * 100) }}%"></span></span>{{ label }}
-{%- endmacro %}
-
-{# An award tile. Use with {% call %}: the body is the detail lines.
-   tone: "good", "bad" or "" for neutral. #}
-{% macro award(title, value, tone="") -%}
-<div class="award-card{% if tone %} award-{{ tone }}{% endif %}">
-  <h3>{{ title }}</h3>
-  <p class="award-value">{{ value }}</p>
-  {{ caller() }}
-</div>
+<span class="team-inline">{{ mark(t) }}<span class="team-name" title="{{ t.name }}">{{ t.name }}</span></span>
 {%- endmacro %}
 
 {# "Team A, Team B" #}
@@ -57,11 +40,96 @@
 {% for t, p in pairs %}{{ p.name }} ({{ t.name }}){% if not loop.last %}, {% endif %}{% endfor %}
 {%- endmacro %}
 
-{# Jump links to a long page's sections: a list of (id, label) pairs. #}
-{% macro toc(items) -%}
-<nav class="page-toc" aria-label="On this page">
-  {% for id, label in items %}<a href="#{{ id }}">{{ label }}</a>{% endfor %}
+{# --- Numbers and markers -------------------------------------------------- #}
+
+{# Week-over-week movement in the rankings: positive is up. #}
+{% macro movement(m) -%}
+{% if m is none or m == 0 %}<span class="move move-none" title="No change">&mdash;</span>
+{%- elif m > 0 %}<span class="move up" title="Up {{ m }}">&#9650;{{ m }}</span>
+{%- else %}<span class="move down" title="Down {{ -m }}">&#9660;{{ -m }}</span>{% endif %}
+{%- endmacro %}
+
+{# A 0-1 share drawn as a small bar, with the label printed next to it. #}
+{% macro meter(share, label, tone="") -%}
+<span class="meter{% if tone %} meter-{{ tone }}{% endif %}" aria-hidden="true"><span style="width:{{ '%.1f' | format([[share, 0] | max, 1] | min * 100) }}%"></span></span>{{ label }}
+{%- endmacro %}
+
+{# A position total with the team's league rank at it; the week's best and
+   worst at the position are marked. extremes is (best rank, worst rank). #}
+{% macro pos_cell(points, rank, extremes) -%}
+{% set lo, hi = extremes %}
+<td class="num{% if lo != hi and rank == lo %} pos-best{% elif lo != hi and rank == hi %} pos-worst{% endif %}">{{ points | fmt2 }} <span class="pos-rank">#{{ rank }}</span></td>
+{%- endmacro %}
+
+{# --- Award tiles ----------------------------------------------------------- #}
+
+{# An award tile. Use with {% call %}: the body is the detail lines.
+   tone: "good", "bad", "warn" or "" for neutral. #}
+{% macro award(title, value, tone="", value_class="") -%}
+<div class="award-card{% if tone %} award-{{ tone }}{% endif %}">
+  <h3>{{ title }}</h3>
+  <p class="award-value{% if value_class %} {{ value_class }}{% endif %}">{{ value }}</p>
+  {{ caller() }}
+</div>
+{%- endmacro %}
+
+{# A season record for a team score: rec is (roster ids, week, score). #}
+{% macro score_record(title, rec, tone="") -%}
+{% set rids, wk, score = rec %}
+{% call award(title, score | fmt2, tone) %}
+<p class="award-teams">{% for rid in rids %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
+{% endcall %}
+{%- endmacro %}
+
+{# A season record for a player: rec is ((roster id, player) pairs, week). #}
+{% macro player_record(title, rec, tone="") -%}
+{% set pairs, wk = rec %}
+{% call award(title, pairs[0][1].points | fmt2 if pairs else "-", tone) %}
+<p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
+{% endcall %}
+{%- endmacro %}
+
+{# "Team A 123.45 – Team B 120.00" #}
+{% macro score_line(a, pa, b, pb) -%}
+{{ a.name }} {{ pa | fmt2 }} &ndash; {{ b.name }} {{ pb | fmt2 }}
+{%- endmacro %}
+
+{# A season record for a game margin: every game tied at that margin. #}
+{% macro game_record(title, games) -%}
+{% call award(title, games[0].margin | fmt2 if games else "-") %}
+{% for g in games %}
+<p class="award-teams">{{ score_line(teams[g.roster_a], g.points_a, teams[g.roster_b], g.points_b) }} (Wk {{ g.week }})</p>
+{% endfor %}
+{% endcall %}
+{%- endmacro %}
+
+{# --- Page structure ------------------------------------------------------- #}
+
+{# A section heading, optionally with a "How this works" link to an anchor on
+   the explainer page. Use with {% call %} to add an aside on the right. The
+   <h2> stays bare: tests find sections by their exact heading. #}
+{% macro section_head(title, how=none, link_text="How this works") -%}
+<div class="section-head">
+  <h2>{{ title }}</h2>
+  {% if how %}<a href="{{ asset_prefix }}how-it-works.html#{{ how }}">{{ link_text }}</a>{% endif %}
+  {% if caller %}{{ caller() }}{% endif %}
+</div>
+{%- endmacro %}
+
+{# Jump links to a page's sections: a list of (id, label) pairs. #}
+{% macro toc(items, label="On this page", wrap=false) -%}
+<nav class="page-toc{% if wrap %} page-toc-wrap{% endif %}" aria-label="{{ label }}">
+  {% for id, text in items %}<a href="#{{ id }}">{{ text }}</a>{% endfor %}
 </nav>
+{%- endmacro %}
+
+{# A Chart.js canvas. `id` must match a key of `renderers` in static/app.js;
+   `label` is read out by screen readers. Hidden when Chart.js can't run. #}
+{% macro chart(id, label, tall=false, hint="", attrs={}) -%}
+<div class="chart-block">
+  <div class="chart-container{% if tall %} chart-tall{% endif %}"><canvas id="{{ id }}" role="img" aria-label="{{ label }}"{{ attrs | xmlattr }}><p class="note">This chart needs JavaScript; the tables on this page have the numbers.</p></canvas></div>
+  {% if hint %}<p class="chart-hint">{{ hint }}</p>{% endif %}
+</div>
 {%- endmacro %}
 
 {# How a week is named in the week picker and pager. #}
@@ -70,12 +138,12 @@
 {%- endmacro %}
 
 {# Previous/next links for the page showing week `current`. #}
-{% macro week_pager(current) -%}
+{% macro week_pager(current, label="Weeks") -%}
 {% if current in all_weeks %}
 {% set i = all_weeks.index(current) %}
-<nav class="pager" aria-label="Weeks">
-  {% if i > 0 %}{% set w = all_weeks[i - 1] %}<a class="pager-prev" href="{{ asset_prefix }}{{ week_url(w) }}">&lsaquo; {{ week_label(w) }}</a>{% endif %}
-  {% if i + 1 < all_weeks | length %}{% set w = all_weeks[i + 1] %}<a class="pager-next" href="{{ asset_prefix }}{{ week_url(w) }}">{{ week_label(w) }} &rsaquo;</a>{% endif %}
+<nav class="pager" aria-label="{{ label }}">
+  {% if i > 0 %}{% set w = all_weeks[i - 1] %}<a class="pager-prev" href="{{ asset_prefix }}{{ week_url(w) }}" rel="prev">&lsaquo; {{ week_label(w) }}</a>{% endif %}
+  {% if i + 1 < all_weeks | length %}{% set w = all_weeks[i + 1] %}<a class="pager-next" href="{{ asset_prefix }}{{ week_url(w) }}" rel="next">{{ week_label(w) }} &rsaquo;</a>{% endif %}
 </nav>
 {% endif %}
 {%- endmacro %}

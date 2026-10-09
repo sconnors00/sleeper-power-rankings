@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui with context %}
 {% set active_page = "trades" %}
+{% set uses_data = true %}
 {% block title %}Trades &middot; {{ league_name }}{% endblock %}
 {% block content %}
 
@@ -17,16 +18,14 @@
 
 {% if values %}
 <section id="calculator">
-  <div class="section-head">
-    <h2>Trade calculator</h2>
-    <a href="how-it-works.html#trade-values">How this works</a>
-  </div>
-  <p class="note">Pick two teams and tap the players each one sends. A player's value is how many more points a week he's projected to score than a replacement-level starter at his position, over the rest of the season: bye weeks still ahead and injuries count against it. The verdict compares the value each team gets. The lineup check plays out each remaining week with and without the deal, including who a team would have to drop or could pick up, to show what it does to each team's starting lineup.</p>
+  {{ ui.section_head("Trade calculator", how="trade-values") }}
+  <p class="note">Pick two teams and tap the players each one sends. A player's value is the points per week he's projected to score above a replacement starter at his position, over the rest of the season, after byes and injuries. The lineup check plays out every remaining week with and without the deal.</p>
   {% if trade_deadline %}
   <p class="note">{% if deadline_passed %}The trade deadline (Week {{ trade_deadline }}) has passed, so this is for what-ifs only.{% else %}Trade deadline: Week {{ trade_deadline }}.{% endif %}</p>
   {% endif %}
-  <div id="trade-calculator" class="trade-calc">
-    <div class="trade-sides">
+  <div id="trade-calculator">
+    <noscript><p class="note">The calculator needs JavaScript; the tables below work without it.</p></noscript>
+    <div class="trade-sides" hidden>
       {% for side in (0, 1) %}
       <div class="trade-side" data-side="{{ side }}">
         <label class="trade-team-label">{{ "First" if side == 0 else "Second" }} team sends
@@ -41,35 +40,32 @@
       </div>
       {% endfor %}
     </div>
-    <div class="trade-result" aria-live="polite">
-      <noscript><p class="note">The calculator needs JavaScript; the tables below work without it.</p></noscript>
-    </div>
+    <p id="trade-status" class="sr-only" aria-live="polite"></p>
+    <div class="trade-summary"></div>
+    <div class="trade-result"></div>
   </div>
 </section>
 {% endif %}
 
 {% if trade_history %}
 <section id="history">
-  <div class="section-head">
-    <h2>{{ "This season's trades" if values else "Trades" }}</h2>
-    <a href="how-it-works.html#pickups">How this works</a>
-  </div>
+  {{ ui.section_head("This season's trades" if values else "Trades", how="pickups") }}
   <p class="note">Each side's haul: points the players it received have scored in its starting lineup since the trade{% if values %}, and what they're worth from here on (projected points per week above replacement){% endif %}. Draft picks are listed but not scored.</p>
   {% for t in trade_history %}
   <div class="trade-history">
   <h3>Week {{ t.week }} &middot; {% if t.lead > 0.005 %}<span class="up">{{ t.leader.name }} +{{ t.lead | fmt2 }}</span>{% else %}even{% endif %}{% if values %} so far{% endif %}
-    {%- if t.forward %} &middot; going forward: {% if t.forward.verdict == "slight edge" %}slight edge to {{ t.forward.team.name }}{% elif t.forward.verdict == "favors" %}favors {{ t.forward.team.name }}{% elif t.forward.verdict == "lopsided" %}lopsided for {{ t.forward.team.name }}{% else %}{{ t.forward.verdict }}{% endif %}{% endif %}</h3>
+    {%- if t.forward %} &middot; going forward: <span class="badge badge-verdict">{% if t.forward.verdict == "slight edge" %}slight edge to {{ t.forward.team.name }}{% elif t.forward.verdict == "favors" %}favors {{ t.forward.team.name }}{% elif t.forward.verdict == "lopsided" %}lopsided for {{ t.forward.team.name }}{% else %}{{ t.forward.verdict }}{% endif %}</span>{% endif %}</h3>
   <div class="table-scroll">
-  <table class="data-table explainer-table">
-    <thead><tr><th>Team</th><th>Received</th><th class="num">Points since</th>{% if values %}<th class="num">Value now</th>{% endif %}</tr></thead>
+  <table class="data-table table-stack">
+    <thead><tr><th>Team</th><th class="num">Points since</th>{% if values %}<th class="num">Value now</th>{% endif %}<th>Received</th></tr></thead>
     <tbody>
       {% for r in t.rows %}
       {% set side = r.side %}
       <tr>
         {{ ui.team_cell(r.team) }}
-        <td class="wrap">{% for a in side.received %}{{ a.player.name }} ({% if a.starts %}{{ a.player.points | fmt2 }} in {{ a.starts }} start{{ "s" if a.starts != 1 }}{% else %}no starts yet{% endif %}){% if not loop.last or side.picks %}, {% endif %}{% endfor %}{% for pk in side.picks %}{{ pk }} pick{% if not loop.last %}, {% endif %}{% endfor %}{% if not side.received and not side.picks %}&mdash;{% endif %}</td>
-        <td class="num">{% if loop.first and t.lead > 0.005 %}<strong class="up">{{ side.points | fmt2 }}</strong>{% else %}{{ side.points | fmt2 }}{% endif %}</td>
-        {% if values %}<td class="num">{{ r.value | fmt2 }}</td>{% endif %}
+        <td class="num" data-label="Points since">{% if loop.first and t.lead > 0.005 %}<strong class="up">{{ side.points | fmt2 }}</strong>{% else %}{{ side.points | fmt2 }}{% endif %}</td>
+        {% if values %}<td class="num" data-label="Value now">{{ r.value | fmt2 }}</td>{% endif %}
+        <td class="wrap" data-label="Received">{% for a in side.received %}{{ a.player.name }} ({% if a.starts %}{{ a.player.points | fmt2 }} in {{ a.starts }} start{{ "s" if a.starts != 1 }}{% else %}no starts yet{% endif %}){% if not loop.last or side.picks %}, {% endif %}{% endfor %}{% for pk in side.picks %}{{ pk }} pick{% if not loop.last %}, {% endif %}{% endfor %}{% if not side.received and not side.picks %}&mdash;{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -94,9 +90,7 @@
         {{ ui.team_cell(entry.team, rank=r.rank) }}
         <td class="num"><strong>{{ r.total | fmt2 }}</strong></td>
         {% for pos in positions %}
-        {% set rank = r.ranks[pos] %}
-        {% set lo, hi = strength_extremes[pos] %}
-        <td class="num{% if lo != hi and rank == lo %} pos-best{% elif lo != hi and rank == hi %} pos-worst{% endif %}">{{ r.points[pos] | fmt2 }} <span class="pos-rank">#{{ rank }}</span></td>
+        {{ ui.pos_cell(r.points[pos], r.ranks[pos], strength_extremes[pos]) }}
         {% endfor %}
       </tr>
       {% endfor %}
@@ -113,17 +107,17 @@
     <summary>{{ group.position }} <span class="summary-aside">replacement level {{ group.replacement | fmt2 }}</span></summary>
     <div class="table-scroll">
     <table class="data-table">
-      <thead><tr><th class="num">#</th><th>Player</th><th>Team</th><th class="num">Scored</th><th class="num">Proj.</th>{% if values.horizon %}<th class="num">Avail.</th>{% endif %}<th class="num">Value</th></tr></thead>
+      <thead><tr><th class="num">#</th><th>Player</th><th class="num">Value</th><th class="num">Proj.</th>{% if values.horizon %}<th class="num">Avail.</th>{% endif %}<th class="num">Scored</th><th>Team</th></tr></thead>
       <tbody>
         {% for pv in group.rows %}
         <tr>
           <td class="num">{{ loop.index }}</td>
           <td>{{ pv.player.name }} <span class="note-inline">{{ pv.player.nfl_team or "FA" }}</span>{% if pv.injury %} <span class="inj">{{ pv.injury }}</span>{% endif %}</td>
-          <td>{{ ui.team_inline(teams[pv.roster_id]) }}</td>
-          <td class="num">{% if pv.games %}{{ pv.ppg | fmt2 }} <span class="note-inline">in {{ pv.games }}</span>{% else %}&mdash;{% endif %}</td>
+          <td class="num"><strong>{{ pv.value | fmt2 }}</strong></td>
           <td class="num">{{ pv.projection | fmt2 }}</td>
           {% if values.horizon %}<td class="num">{{ "%g" | format(pv.weeks_available) }}</td>{% endif %}
-          <td class="num"><strong>{{ pv.value | fmt2 }}</strong></td>
+          <td class="num">{% if pv.games %}{{ pv.ppg | fmt2 }} <span class="note-inline">in {{ pv.games }}</span>{% else %}&mdash;{% endif %}</td>
+          <td>{{ ui.team_inline(teams[pv.roster_id]) }}</td>
         </tr>
         {% endfor %}
       </tbody>

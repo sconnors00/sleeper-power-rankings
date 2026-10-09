@@ -11,34 +11,18 @@
   {{ ui.week_pager(recap_week) }}
 </div>
 
-<div class="awards-grid">
-  {% call ui.award("Highest scoring team", records.highest_team_score[2] | fmt2, "good") %}
-  <p class="award-teams">{% for rid in records.highest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ records.highest_team_score[1] }})</p>
-  {% endcall %}
-  {% call ui.award("Lowest scoring team", records.lowest_team_score[2] | fmt2, "bad") %}
-  <p class="award-teams">{% for rid in records.lowest_team_score[0] %}{{ teams[rid].name }}{% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ records.lowest_team_score[1] }})</p>
-  {% endcall %}
-  {% set pairs, wk = records.highest_starter %}
-  {% call ui.award("Highest scoring active player", pairs[0][1].points | fmt2 if pairs else "", "good") %}
-  <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
-  {% endcall %}
-  {% set pairs, wk = records.lowest_starter %}
-  {% call ui.award("Lowest scoring active player", pairs[0][1].points | fmt2 if pairs else "", "bad") %}
-  <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
-  {% endcall %}
-  {% set pairs, wk = records.highest_bench_player %}
-  {% call ui.award("Highest bench player", pairs[0][1].points | fmt2 if pairs else "") %}
-  <p class="award-teams">{% for rid, p in pairs %}{{ p.name }} ({{ teams[rid].name }}){% if not loop.last %}, {% endif %}{% endfor %} (Wk {{ wk }})</p>
-  {% endcall %}
-  {% call ui.award("Closest game of the year", records.closest_games[0].margin | fmt2 if records.closest_games else "-") %}
-  {% for g in records.closest_games %}
-  <p class="award-teams">{{ teams[g.roster_a].name }} {{ g.points_a | fmt2 }} &ndash; {{ teams[g.roster_b].name }} {{ g.points_b | fmt2 }} (Wk {{ g.week }})</p>
-  {% endfor %}
-  {% endcall %}
-  {% call ui.award("Biggest blowout of the year", records.biggest_blowouts[0].margin | fmt2 if records.biggest_blowouts else "-") %}
-  {% for g in records.biggest_blowouts %}
-  <p class="award-teams">{{ teams[g.roster_a].name }} {{ g.points_a | fmt2 }} &ndash; {{ teams[g.roster_b].name }} {{ g.points_b | fmt2 }} (Wk {{ g.week }})</p>
-  {% endfor %}
-  {% endcall %}
-</div>
+<section class="bare">
+  <h2>Season awards</h2>
+  <div class="awards-grid">
+    {{ ui.score_record("Highest scoring team", records.highest_team_score, "good") }}
+    {{ ui.score_record("Lowest scoring team", records.lowest_team_score, "bad") }}
+    {{ ui.player_record("Highest scoring active player", records.highest_starter, "good") }}
+    {{ ui.player_record("Lowest scoring active player", records.lowest_starter, "bad") }}
+    {{ ui.player_record("Highest bench player", records.highest_bench_player) }}
+    {{ ui.game_record("Closest game of the year", records.closest_games) }}
+    {{ ui.game_record("Biggest blowout of the year", records.biggest_blowouts) }}
+  </div>
+</section>
+
+{{ ui.week_pager(recap_week, label="More weeks") }}
 {% endblock %}

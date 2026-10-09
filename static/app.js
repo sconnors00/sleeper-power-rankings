@@ -1,7 +1,35 @@
+// Shared helpers. Team colors follow the theme: each team has a light and a
+// dark palette color (data.js `color` / `colorDark`), like the team marks in
+// style.css.
+var FFPR_UTIL = (function () {
+  "use strict";
+  function team(rid) {
+    var data = window.FFPR;
+    return data && data.teams ? data.teams[String(rid)] : null;
+  }
+  function isDark() {
+    return getComputedStyle(document.documentElement).colorScheme === "dark";
+  }
+  return {
+    isDark: isDark,
+    teamName: function (rid) {
+      var t = team(rid);
+      return t ? t.name : "Team " + rid;
+    },
+    teamColor: function (rid, fallback) {
+      var t = team(rid);
+      if (!t) return fallback || "#808080";
+      return isDark() && t.colorDark ? t.colorDark : t.color;
+    },
+  };
+})();
+
 // Header. The theme button cycles auto (follow the OS) -> light -> dark; the
 // choice is saved and stamped on <html> as data-theme, which style.css keys
 // its tokens off, and an inline script in base.html applies it before first
-// paint. On a narrow screen the nav scrolls to show the current page's link.
+// paint. The week and season pickers navigate on a mouse or touch pick, but
+// from the keyboard only on Enter, so arrowing through the options doesn't
+// leave the page. On a narrow screen the nav scrolls to the current page.
 (function () {
   "use strict";
   var KEY = "ffpr-theme";
@@ -26,6 +54,22 @@
       nav.scrollLeft = here.offsetLeft - nav.offsetLeft - (nav.clientWidth - here.offsetWidth) / 3;
     }
 
+    Array.prototype.forEach.call(document.querySelectorAll("select[data-nav]"), function (select) {
+      var keyed = false;
+      select.hidden = false;
+      select.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          if (select.value) window.location.href = select.value;
+        } else {
+          keyed = /^(Arrow|Page|Home|End)/.test(e.key) || e.key.length === 1;
+        }
+      });
+      select.addEventListener("change", function () {
+        if (!keyed && select.value) window.location.href = select.value;
+        keyed = false;
+      });
+    });
+
     var button = document.querySelector(".theme-toggle");
     if (!button) return;
     show(button, current());
@@ -48,10 +92,18 @@
 
 // Charts (week and season pages). Colors come from the CSS tokens in
 // style.css, so they follow the theme; every chart is redrawn when it changes.
+// Each renderer's key is a canvas id from the ui.chart macro in _macros.html.
 (function () {
   "use strict";
   var DATA = window.FFPR;
-  if (!DATA || typeof Chart === "undefined") return;
+  if (!DATA || typeof Chart === "undefined") {
+    // style.css hides the empty chart cards
+    document.documentElement.classList.add("no-charts");
+    return;
+  }
+  var teamColor = FFPR_UTIL.teamColor;
+  var teamName = FFPR_UTIL.teamName;
+  var PICK_KEY = "ffpr-trade-team"; // the team you last looked at in the trade calculator
 
   var C = {};
   function readTokens() {
@@ -65,12 +117,16 @@
       surface: token("--surface"),
       border: token("--border"),
       accent: token("--accent"),
+      bad: token("--bad"),
       font: token("--font"),
     };
     Chart.defaults.color = C.secondary;
     Chart.defaults.borderColor = C.gridline;
     Chart.defaults.font.family = C.font;
     Chart.defaults.font.size = 11;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      Chart.defaults.animation = false;
+    }
     var tip = Chart.defaults.plugins.tooltip;
     tip.backgroundColor = C.surface;
     tip.titleColor = C.ink;
@@ -89,37 +145,22 @@
     legend.padding = 12;
   }
 
-  function teamColor(rosterId) {
-    var t = DATA.teams[String(rosterId)];
-    return t ? t.color : C.muted;
-  }
-  function teamName(rosterId) {
-    var t = DATA.teams[String(rosterId)];
-    return t ? t.name : "Team " + rosterId;
-  }
   // "#2a78d6" at the given opacity.
   function alpha(hex, a) {
     var n = parseInt(hex.slice(1), 16);
     return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
   }
-
-  // Tap-to-isolate legend: tap a team, others hide; tap again to restore.
-  function isolateOnClick() {
-    var isolated = null;
-    return function (e, legendItem, legend) {
-      var chart = legend.chart;
-      var idx = legendItem.datasetIndex;
-      isolated = isolated === idx ? null : idx;
-      chart.data.datasets.forEach(function (ds, i) {
-        chart.setDatasetVisibility(i, isolated === null || i === isolated);
-      });
-      chart.update();
-    };
+  function signed(x, digits) {
+    return (x > 0 ? "+" : "") + x.toFixed(digits);
   }
 
-  // Line charts with a line per team: hovering near a team's line fades the
-  // rest, and leaving the chart brings them all back. Team lines read
-  // chart.$highlighted through scriptable colors (see teamLine).
+  // Line charts with a line per team: hovering near a team's line picks it
+  // out and fades the rest; leaving the chart goes back to the chart's
+  // chosen team ($picked), if it has one. Team lines read these through
+  // scriptable colors (see teamLine), which Chart.js re-resolves on update.
+  function focused(chart) {
+    return chart.$highlighted != null ? chart.$highlighted : chart.$picked;
+  }
   function highlightOnHover(event, elements, chart) {
     var idx = elements.length ? elements[0].datasetIndex : null;
     if (idx !== null && !chart.data.datasets[idx].$team) idx = null;
@@ -134,13 +175,16 @@
     },
   };
 
-  function teamLine(rid, data) {
+  // One team's line. With `context`, lines other than the focused one recede
+  // to thin gray instead of a faded team color.
+  function teamLine(rid, data, context) {
     var color = teamColor(rid);
-    var faded = alpha(color, 0.15);
-    function shade(ctx) {
-      var on = ctx.chart.$highlighted;
-      return on == null || on === ctx.datasetIndex ? color : faded;
+    var faded = context ? alpha(C.muted, 0.3) : alpha(color, 0.15);
+    function on(ctx) {
+      var f = focused(ctx.chart);
+      return f == null || f === ctx.datasetIndex;
     }
+    function shade(ctx) { return on(ctx) ? color : faded; }
     return {
       label: teamName(rid),
       data: data,
@@ -149,13 +193,59 @@
       backgroundColor: shade,
       pointBackgroundColor: shade,
       pointBorderColor: shade,
-      borderWidth: function (ctx) { return ctx.chart.$highlighted === ctx.datasetIndex ? 3.5 : 2; },
-      pointRadius: 2.5,
+      borderWidth: function (ctx) { return focused(ctx.chart) === ctx.datasetIndex ? 3.5 : 2; },
+      pointRadius: function (ctx) { return context && !on(ctx) ? 0 : 2.5; },
       pointHoverRadius: 6,
       spanGaps: true,
-      cubicInterpolationMode: "monotone",
     };
   }
+
+  // Each team's name at the end of its line, so the lines need no legend.
+  var endLabels = {
+    id: "endLabels",
+    afterDatasetsDraw: function (chart) {
+      var c = chart.ctx;
+      var narrow = chart.width < 480;
+      c.save();
+      c.font = "500 11px " + C.font;
+      c.textBaseline = "middle";
+      chart.data.datasets.forEach(function (ds, i) {
+        var meta = chart.getDatasetMeta(i);
+        if (!ds.$team || meta.hidden || !meta.data.length) return;
+        var last = meta.data[meta.data.length - 1];
+        var f = focused(chart);
+        c.globalAlpha = f == null || f === i ? 1 : 0.35;
+        c.fillStyle = C.secondary;
+        var text = narrow && ds.label.length > 11 ? ds.label.slice(0, 10) + "…" : ds.label;
+        c.fillText(text, last.x + 8, last.y);
+      });
+      c.restore();
+    },
+  };
+
+  // The value at the end of each horizontal bar.
+  var barValues = {
+    id: "barValues",
+    afterDatasetsDraw: function (chart) {
+      var c = chart.ctx;
+      c.save();
+      c.font = "600 11px " + C.font;
+      c.fillStyle = C.secondary;
+      c.textBaseline = "middle";
+      chart.data.datasets.forEach(function (ds, i) {
+        var meta = chart.getDatasetMeta(i);
+        if (meta.hidden) return;
+        meta.data.forEach(function (bar, j) {
+          var v = ds.data[j];
+          if (v == null) return;
+          var left = v < 0;
+          c.textAlign = left ? "right" : "left";
+          c.fillText(ds.$format ? ds.$format(v) : v.toFixed(1), bar.x + (left ? -6 : 6), bar.y);
+        });
+      });
+      c.restore();
+    },
+  };
 
   var xAxis = { grid: { display: false }, border: { display: false } };
   function yAxis(extra) {
@@ -175,19 +265,33 @@
       var datasets = Object.keys(rt.series).map(function (rid) {
         return teamLine(rid, rt.series[rid].slice(0, weeks.length));
       });
+      var n = datasets.length;
+      // room on the right for the longest end label
+      var c = canvas.getContext("2d");
+      c.font = "500 11px " + C.font;
+      var widest = datasets.reduce(function (w, ds) { return Math.max(w, c.measureText(ds.label).width); }, 0);
+      var room = Math.min(widest + 14, canvas.parentNode.clientWidth < 480 ? 76 : 180);
       return {
         type: "line",
         data: { labels: weekLabels(weeks), datasets: datasets },
-        plugins: [clearHighlightOnLeave],
+        plugins: [clearHighlightOnLeave, endLabels],
         options: {
+          layout: { padding: { right: room } },
           interaction: { mode: "nearest", intersect: false },
           onHover: highlightOnHover,
           scales: {
-            y: yAxis({ reverse: true, min: 1, max: datasets.length, ticks: { stepSize: 1 } }),
+            y: yAxis({
+              reverse: true,
+              min: 0.5,
+              max: n + 0.5,
+              afterBuildTicks: function (axis) {
+                axis.ticks = datasets.map(function (_, i) { return { value: i + 1 }; });
+              },
+            }),
             x: xAxis,
           },
           plugins: {
-            legend: { position: "bottom", onClick: isolateOnClick() },
+            legend: { display: false },
             tooltip: {
               callbacks: {
                 label: function (ctx) { return ctx.dataset.label + ": #" + ctx.parsed.y; },
@@ -207,14 +311,17 @@
           labels: rows.map(function (r) { return teamName(r.rosterId); }),
           datasets: [{
             data: rows.map(function (r) { return r.points; }),
-            backgroundColor: rows.map(function (r) { return teamColor(r.rosterId); }),
-            borderRadius: 6,
-            borderSkipped: false,
-            maxBarThickness: 22,
+            backgroundColor: rows.map(function (r) {
+              return r.margin > 0 ? C.accent : alpha(C.muted, 0.45);
+            }),
+            borderRadius: 4,
+            maxBarThickness: 18,
           }],
         },
+        plugins: [barValues],
         options: {
           indexAxis: "y",
+          layout: { padding: { right: 44 } },
           plugins: {
             legend: { display: false },
             tooltip: {
@@ -222,31 +329,29 @@
                 label: function (ctx) {
                   var r = rows[ctx.dataIndex];
                   var opp = r.opponentRosterId != null ? teamName(r.opponentRosterId) : "bye";
-                  var margin = r.margin != null ? (r.margin >= 0 ? "+" : "") + r.margin.toFixed(2) : "";
-                  return r.points.toFixed(2) + " vs " + opp + " (" + margin + ")";
+                  var margin = r.margin != null ? " (" + signed(r.margin, 2) + ")" : "";
+                  return r.points.toFixed(2) + " vs " + opp + margin;
                 },
               },
             },
           },
-          scales: { x: yAxis(), y: xAxis },
+          scales: { x: { display: false, beginAtZero: true }, y: xAxis },
         },
       };
     },
 
-    "chart-weekly-points": function () {
+    "chart-weekly-points": function (canvas) {
       var wp = DATA.weeklyPointsByTeam;
-      var datasets = Object.keys(wp.series).map(function (rid) {
-        return teamLine(rid, wp.series[rid]);
-      });
+      var ids = Object.keys(wp.series);
+      var datasets = ids.map(function (rid) { return teamLine(rid, wp.series[rid], true); });
       datasets.push({
         label: "League average",
         data: wp.leagueAvg,
-        borderColor: C.muted,
-        backgroundColor: C.muted,
+        borderColor: C.secondary,
+        backgroundColor: C.secondary,
         borderDash: [6, 4],
-        borderWidth: 2,
+        borderWidth: 1.5,
         pointRadius: 0,
-        cubicInterpolationMode: "monotone",
       });
       return {
         type: "line",
@@ -255,9 +360,11 @@
         options: {
           interaction: { mode: "nearest", intersect: false },
           onHover: highlightOnHover,
-          plugins: { legend: { position: "bottom", onClick: isolateOnClick() } },
+          plugins: { legend: { display: false } },
           scales: { x: xAxis, y: yAxis() },
         },
+        // after the chart exists: the "Highlight" team picker above it
+        $after: function (chart) { pickTeam(chart, ids); },
       };
     },
 
@@ -272,21 +379,20 @@
               label: "Range",
               data: rows.map(function (r) { return [r.low, r.high]; }),
               backgroundColor: alpha(C.accent, 0.35),
-              borderColor: C.accent,
-              borderWidth: 1,
-              borderRadius: 6,
-              borderSkipped: false,
+              borderRadius: 4,
               maxBarThickness: 34,
             },
             {
               label: "Median",
               type: "line",
               data: rows.map(function (r) { return r.median; }),
+              showLine: false,
+              pointStyle: "line",
+              pointRadius: 12,
+              pointHoverRadius: 12,
+              borderWidth: 2,
               borderColor: C.ink,
-              borderDash: [4, 4],
-              pointRadius: 3,
-              pointBackgroundColor: C.ink,
-              borderWidth: 1,
+              pointBorderColor: C.ink,
             },
           ],
         },
@@ -306,53 +412,50 @@
               },
             },
           },
-          scales: { x: xAxis, y: yAxis() },
+          scales: { x: xAxis, y: yAxis({ beginAtZero: false, grace: "5%" }) },
         },
       };
     },
 
+    // Luck as wins: how many more (or fewer) games a team won than its
+    // all-play record says its scores deserved.
     "chart-luck": function () {
-      var rows = DATA.luck;
+      var rows = DATA.luck.map(function (r) {
+        return { r: r, wins: (r.winPct - r.allplayPct) * r.games };
+      }).sort(function (a, b) { return b.wins - a.wins; });
       return {
-        type: "scatter",
+        type: "bar",
         data: {
-          datasets: [
-            {
-              label: "Teams",
-              data: rows.map(function (r) { return { x: r.allplayPct, y: r.winPct }; }),
-              backgroundColor: rows.map(function (r) { return teamColor(r.rosterId); }),
-              borderColor: C.surface,
-              borderWidth: 2,
-              pointRadius: 8,
-              pointHoverRadius: 10,
-            },
-            {
-              label: "Even luck",
-              type: "line",
-              data: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
-              borderColor: C.muted,
-              borderDash: [4, 4],
-              pointRadius: 0,
-              borderWidth: 1,
-            },
-          ],
+          labels: rows.map(function (x) { return teamName(x.r.rosterId); }),
+          datasets: [{
+            data: rows.map(function (x) { return x.wins; }),
+            backgroundColor: rows.map(function (x) { return x.wins >= 0 ? C.accent : alpha(C.bad, 0.85); }),
+            borderRadius: 4,
+            maxBarThickness: 16,
+            $format: function (v) { return signed(v, 1); },
+          }],
         },
+        plugins: [barValues],
         options: {
+          indexAxis: "y",
+          layout: { padding: { left: 30, right: 30 } },
           plugins: {
             legend: { display: false },
             tooltip: {
-              filter: function (ctx) { return ctx.dataset.label === "Teams"; },
               callbacks: {
                 label: function (ctx) {
-                  var r = rows[ctx.dataIndex];
-                  return teamName(r.rosterId) + ": " + r.record + " (all-play " + r.allplayRecord + ")";
+                  var x = rows[ctx.dataIndex];
+                  return signed(x.wins, 1) + " wins: " + x.r.record + " (all-play " + x.r.allplayRecord + ")";
                 },
               },
             },
           },
           scales: {
-            x: yAxis({ title: { display: true, text: "All-play win %" }, min: 0, max: 1 }),
-            y: yAxis({ title: { display: true, text: "Actual win %" }, min: 0, max: 1 }),
+            x: yAxis({
+              title: { display: true, text: "Wins above what scores earned" },
+              ticks: { callback: function (v) { return (v > 0 ? "+" : "") + v; } },
+            }),
+            y: xAxis,
           },
         },
       };
@@ -371,34 +474,46 @@
         },
         options: {
           indexAxis: "y",
-          plugins: { legend: { position: "bottom" } },
-          scales: { x: yAxis(), y: xAxis },
-        },
-      };
-    },
-
-    "chart-bench": function () {
-      var rows = DATA.benchPoints.slice().sort(function (a, b) { return b.points - a.points; });
-      return {
-        type: "bar",
-        data: {
-          labels: rows.map(function (r) { return teamName(r.rosterId); }),
-          datasets: [{
-            data: rows.map(function (r) { return r.points; }),
-            backgroundColor: rows.map(function (r) { return teamColor(r.rosterId); }),
-            borderRadius: 6,
-            borderSkipped: false,
-            maxBarThickness: 22,
-          }],
-        },
-        options: {
-          indexAxis: "y",
-          plugins: { legend: { display: false } },
+          plugins: { legend: { position: "bottom", labels: { pointStyle: "rectRounded" } } },
           scales: { x: yAxis(), y: xAxis },
         },
       };
     },
   };
+
+  // The weekly-points chart highlights one team, picked above the chart:
+  // the team last used in the trade calculator, else this week's #1.
+  function pickTeam(chart, ids) {
+    var select = document.getElementById("highlight-team");
+    if (!select) return;
+    var saved = null;
+    try {
+      saved = window.localStorage.getItem(PICK_KEY);
+    } catch (e) {
+      saved = null;
+    }
+    var rt = DATA.rankTrajectory.series;
+    var leader = ids.filter(function (rid) { return rt[rid] && rt[rid][rt[rid].length - 1] === 1; })[0];
+    // a redraw (theme change) keeps whatever was picked on this page
+    var rid = select.getAttribute("data-picked") ||
+      (saved && ids.indexOf(saved) >= 0 ? saved : leader || ids[0]);
+    function apply(value) {
+      chart.$picked = ids.indexOf(value);
+      chart.update("none");
+    }
+    select.value = rid;
+    apply(rid);
+    select.parentNode.hidden = false;
+    select.onchange = function () {
+      select.setAttribute("data-picked", select.value);
+      apply(select.value);
+      try {
+        window.localStorage.setItem(PICK_KEY, select.value);
+      } catch (e) {
+        // blocked storage: just don't remember
+      }
+    };
+  }
 
   var charts = [];
   function renderAll() {
@@ -409,9 +524,13 @@
       var canvas = document.getElementById(id);
       if (!canvas) return;
       var config = renderers[id](canvas);
+      var after = config.$after;
+      delete config.$after;
       config.options.responsive = true;
       config.options.maintainAspectRatio = false;
-      charts.push(new Chart(canvas, config));
+      var chart = new Chart(canvas, config);
+      if (after) after(chart);
+      charts.push(chart);
     });
   }
 
@@ -453,6 +572,9 @@
     return { el: el, select: select, current: select.value, picked: [] };
   });
   var result = root.querySelector(".trade-result");
+  var status = document.getElementById("trade-status"); // read out by screen readers
+  var summary = root.querySelector(".trade-summary"); // sticky verdict on phones
+  var announced = false;
 
   function h(tag, className, children) {
     var node = document.createElement(tag);
@@ -472,18 +594,25 @@
   function trend(x) {
     return Math.abs(x) < 0.005 ? "" : x > 0 ? "up" : "down";
   }
-  function teamName(rid) {
-    var t = DATA.teams[String(rid)];
-    return t ? t.name : "Team " + rid;
+  var teamName = FFPR_UTIL.teamName;
+  var teamColor = FFPR_UTIL.teamColor;
+  // A team's badge and name, built like ui.team_inline in _macros.html.
+  function teamInline(rid) {
+    var t = DATA.teams[String(rid)] || {};
+    var mark = h("span", "team-mark", [(Array.from(teamName(rid))[0] || "?").toUpperCase()]);
+    mark.setAttribute("aria-hidden", "true");
+    mark.style.setProperty("--team-l", t.color || "#808080");
+    mark.style.setProperty("--team-d", t.colorDark || t.color || "#808080");
+    if (t.avatar) {
+      var img = h("img", "team-avatar");
+      img.alt = "";
+      img.src = t.avatar;
+      mark.appendChild(img);
+    }
+    return h("span", "team-inline", [mark, h("span", "team-name", [teamName(rid)])]);
   }
-  function teamColor(rid) {
-    var t = DATA.teams[String(rid)];
-    return t ? t.color : "#898781";
-  }
-  function swatch(rid) {
-    var s = h("span", "team-swatch");
-    s.style.background = teamColor(rid);
-    return s;
+  function checkboxFor(i, pid) {
+    return sides[i].el.querySelector('.trade-roster input[value="' + pid + '"]');
   }
   function total(pids, key) {
     return pids.reduce(function (acc, pid) { return acc + PLAYERS[pid][key]; }, 0);
@@ -759,7 +888,7 @@
   function teamCard(t) {
     var delta = t.after - t.before;
     var card = h("div", "award-card", [
-      h("h3", null, [swatch(t.rid), " " + teamName(t.rid)]),
+      h("h3", null, [teamInline(t.rid)]),
       h("p", "trade-line", [
         "Gets ", h("strong", null, [fmt(t.gets)]), " · gives " + fmt(t.gives) + " · net ",
         h("span", trend(t.gets - t.gives), [signed(t.gets - t.gives)]),
@@ -770,6 +899,7 @@
         h("strong", trend(delta), [signed(delta)]),
       ]),
     ]);
+    card.style.setProperty("--award-accent", teamColor(t.rid));
     if (HORIZON.length && t.weight > 0 && Math.abs(delta) >= 0.005) {
       card.appendChild(h("p", "note trade-line", [horizonNote(t, delta)]));
     }
@@ -812,19 +942,17 @@
     picks.forEach(function (pid) {
       var btn = h("button", "btn", [PLAYERS[pid].name + " (" + fmt(PLAYERS[pid].value) + ")"]);
       btn.type = "button";
-      btn.addEventListener("click", function () { toggle(s, pid, true); });
+      btn.addEventListener("click", function () {
+        toggle(s, pid, true);
+        var chips = sides[s].el.querySelectorAll(".trade-chip");
+        if (chips.length) chips[chips.length - 1].focus();
+      });
       p.appendChild(btn);
     });
     return p;
   }
 
-  function renderResult() {
-    result.textContent = "";
-    if (!sides[0].picked.length && !sides[1].picked.length) {
-      result.appendChild(h("p", "note", ["Tap players on either side to build a trade."]));
-      return;
-    }
-    var a = analyze();
+  function valueBar(a) {
     var bar = h("div", "trade-bar");
     [0, 1].forEach(function (i) {
       var seg = h("span");
@@ -832,6 +960,20 @@
       seg.style.background = teamColor(sides[i].select.value);
       bar.appendChild(seg);
     });
+    return bar;
+  }
+
+  function renderResult() {
+    result.textContent = "";
+    summary.textContent = "";
+    if (!sides[0].picked.length && !sides[1].picked.length) {
+      result.appendChild(h("p", "note", ["Tap players on either side to build a trade."]));
+      status.textContent = announced ? "Trade cleared." : "";
+      announced = false;
+      return;
+    }
+    var a = analyze();
+    var bar = valueBar(a);
     var detail = a.verdict.key === "even"
       ? "Neither side gets a player projected above replacement level."
       : teamName(a.teams[0].rid) + " gets " + fmt(a.gets[0]) + " in value, " +
@@ -842,8 +984,18 @@
       h("p", "award-value", [headline(a.verdict)]),
       h("p", "award-teams", [detail]),
       bar,
+      h("div", "trade-bar-legend", [0, 1].map(function (i) {
+        return h("span", null, [teamName(a.teams[i].rid) + " " + fmt(a.gets[i])]);
+      })),
       h("p", "trade-line", [h("strong", null, ["Lineup fit: "]), fitLine(a.teams)]),
     ]));
+    status.textContent = headline(a.verdict) + ". Lineup fit: " + fitLine(a.teams) + ".";
+    announced = true;
+    var jump = h("button", null, [headline(a.verdict), valueBar(a)]);
+    jump.type = "button";
+    jump.setAttribute("aria-label", "Show the verdict");
+    jump.addEventListener("click", function () { result.scrollIntoView({ behavior: "smooth", block: "start" }); });
+    summary.appendChild(jump);
     result.appendChild(h("div", "trade-teams", a.teams.map(teamCard)));
     var hint = suggestions(a);
     if (hint) result.appendChild(hint);
@@ -857,6 +1009,7 @@
       sides[0].picked = [];
       sides[1].picked = [];
       update();
+      sides[0].select.focus();
     });
     result.appendChild(h("div", "trade-actions", [share, clear]));
   }
@@ -890,19 +1043,22 @@
       Object.keys(groups).filter(function (p) { return POS_ORDER.indexOf(p) < 0; }).sort()
     );
     order.forEach(function (pos) {
-      box.appendChild(h("div", "trade-group", [pos]));
+      var group = h("div", null, [h("div", "trade-group", [pos])]);
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", pos);
+      box.appendChild(group);
       groups[pos].forEach(function (pid) {
         var p = PLAYERS[pid];
         var input = h("input");
         input.type = "checkbox";
         input.value = pid;
         input.addEventListener("change", function () { toggle(i, pid, input.checked); });
-        box.appendChild(h("label", "trade-player", [
+        group.appendChild(h("label", "trade-player", [
           input,
           h("span", "trade-name", [p.name]),
           p.injury ? h("span", "inj", [p.injury]) : null,
-          h("span", "trade-meta", [(p.nfl || "FA") + " · " + fmt(p.proj)]),
-          h("span", "trade-val", [fmt(p.value)]),
+          h("span", "trade-meta", [(p.nfl || "FA") + " · ", h("span", "sr-only", ["projected "]), fmt(p.proj)]),
+          h("span", "trade-val", [h("span", "sr-only", ["value "]), fmt(p.value)]),
         ]));
       });
     });
@@ -920,7 +1076,14 @@
       var chip = h("button", "trade-chip", [PLAYERS[pid].name + " " + fmt(PLAYERS[pid].value) + " ×"]);
       chip.type = "button";
       chip.setAttribute("aria-label", "Remove " + PLAYERS[pid].name);
-      chip.addEventListener("click", function () { toggle(i, pid, false); });
+      chip.addEventListener("click", function () {
+        // keep keyboard focus nearby: the next chip, else the player's checkbox
+        var at = sides[i].picked.indexOf(pid);
+        toggle(i, pid, false);
+        var chips = sides[i].el.querySelectorAll(".trade-chip");
+        var next = chips[Math.min(at, chips.length - 1)] || checkboxFor(i, pid);
+        if (next) next.focus();
+      });
       box.appendChild(chip);
     });
     box.appendChild(h("p", "trade-total", ["Sends " + fmt(total(picked, "value")) + " in value"]));
@@ -986,6 +1149,7 @@
 
   function update() {
     [0, 1].forEach(function (i) {
+      sides[i].el.style.setProperty("--team", teamColor(sides[i].select.value));
       renderPicked(i);
       syncChecks(i);
     });
@@ -1021,6 +1185,11 @@
   });
 
   document.addEventListener("DOMContentLoaded", function () {
+    root.querySelector(".trade-sides").hidden = false; // shown only when this runs
+    // team colors follow the theme
+    document.addEventListener("ffpr:theme", update);
+    var media = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+    if (media && media.addEventListener) media.addEventListener("change", update);
     if (!readHash()) {
       var saved = null;
       try {

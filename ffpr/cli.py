@@ -407,7 +407,6 @@ def build(
     league_id = resolve_league_id(league, config)
     weights = config.get("weights", DEFAULT_WEIGHTS)
     form_window = config.get("form", {}).get("window", DEFAULT_FORM_WINDOW)
-    site_url = config.get("site_url", "")
 
     with SleeperClient(DATA_DIR) as client:
         season_summary = _build_season_summary(
@@ -427,14 +426,11 @@ def build(
     all_seasons = [s.season for s in all_summaries]
     rivalries = build_rivalries(all_summaries)
 
-    render_site(
-        season_summary, SITE_DIR, site_url=site_url, all_seasons=all_seasons, rivalries=rivalries
-    )
+    render_site(season_summary, SITE_DIR, all_seasons=all_seasons, rivalries=rivalries)
     for s in all_summaries:
         render_site(
             s,
             SITE_DIR / s.season,
-            site_url=site_url,
             all_seasons=all_seasons,
             site_root_prefix="../",
             rivalries=rivalries,

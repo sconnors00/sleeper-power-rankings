@@ -13,6 +13,7 @@ class Team:
     avatar_url: str | None
     color: str
     owner_name: str | None = None  # the manager's Sleeper display name
+    color_dark: str | None = None  # the same team's color in the dark theme
 
 
 @dataclass
@@ -327,6 +328,7 @@ class Manager:
     color: str
     seasons: list[str]  # newest first
     rivals: list[HeadToHead]  # most meetings first
+    color_dark: str | None = None  # the same color in the dark theme
 
     @property
     def wins(self) -> int:

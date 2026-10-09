@@ -635,3 +635,22 @@ def test_no_rosters_page_without_a_report(tmp_path, teams_only_season):
     out = tmp_path / "site"
     render_site(teams_only_season, out)
     assert not (out / "rosters.html").exists() and not (out / "rosters.json").exists()
+
+
+def _css_tokens(css: str, selector: str) -> dict[str, str]:
+    """The --custom-property: value pairs declared in `selector { ... }`."""
+    body = css.split(selector + " {", 1)[1].split("}", 1)[0]
+    return dict(re.findall(r"(--[\w-]+):\s*([^;]+);", body))
+
+
+def test_dark_tokens_in_sync():
+    """style.css writes the dark theme twice (follow-the-OS, and the theme
+    button's explicit choice); a token added to one block must be in both."""
+    from ffpr.build import STATIC_DIR
+
+    css = (STATIC_DIR / "style.css").read_text()
+    light = _css_tokens(css, ":root")
+    os_dark = _css_tokens(css, ':root:not([data-theme="light"])')
+    picked_dark = _css_tokens(css, ':root[data-theme="dark"]')
+    assert os_dark and os_dark == picked_dark
+    assert set(os_dark) <= set(light)
