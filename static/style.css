@@ -32,7 +32,7 @@
   --bad-soft: rgba(192, 48, 47, 0.1);
   --warn: #b45309;
   --gold: #c99a06;
-  --gold-ink: #866400;
+  --gold-ink: #7a5b00;
   --gold-soft: rgba(201, 154, 6, 0.16);
   --silver: #8f98a3;
   --bronze: #c47a40;
@@ -557,7 +557,7 @@ tbody tr:hover td.team-cell:first-child { background: var(--surface-2); }
 .team-cell, .team-inline { white-space: nowrap; }
 /* Long team names in card titles wrap instead of widening the page. */
 .section-head h2 .team-inline { white-space: normal; }
-.section-head h2 .team-inline .team-name { min-width: 0; }
+.section-head h2 .team-inline .team-name { min-width: 0; overflow-wrap: anywhere; }
 .team-cell .rank { margin-right: 0.6rem; }
 .team-inline { display: inline-flex; align-items: center; gap: 0.45rem; vertical-align: middle; }
 .team-mark {
@@ -697,9 +697,11 @@ tbody tr:hover td.pos-worst { background: var(--bad-soft); }
 .key:first-child { margin-left: 0; }
 .key-won { background: var(--accent); }
 .key-lost { background: var(--text-muted); opacity: 0.45; }
-.chart-pick { display: inline-flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; margin-bottom: 0.5rem; }
+.chart-pick { display: inline-flex; gap: 0.4rem; align-items: center; max-width: 100%; font-size: 0.85rem; margin-bottom: 0.5rem; }
 .chart-pick[hidden] { display: none; }
 .chart-pick select {
+  min-width: 0;
+  max-width: 100%;
   font: inherit;
   padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);
@@ -722,14 +724,15 @@ tr.bye-line td { border-bottom: 1px dashed var(--text-muted); }
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.25rem 0.75rem;
-    padding: 0.65rem 0.1rem;
+    padding: 0.65rem 0.25rem;
     border-bottom: 1px solid var(--gridline);
   }
   .table-stack tbody tr:last-child { border-bottom: 0; }
   .table-stack td { display: block; padding: 0; border: 0; white-space: normal; min-width: 0; text-align: left; }
   .table-stack td.team-cell, .table-stack td.wrap { grid-column: 1 / -1; position: static; box-shadow: none; }
   .table-stack td.team-cell .team-name { max-width: none; }
-  .table-stack tbody tr:hover td { background: none; }
+  .table-stack tbody tr:hover td,
+  .table-stack tbody tr:hover td.team-cell:first-child { background: none; }
   .table-stack td[data-label]::before {
     content: attr(data-label);
     display: block;
@@ -849,6 +852,8 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
 .grade-b { color: var(--accent); }
 .grade-c { color: var(--warn); }
 .grade-d { color: var(--bad); }
+.award-card h3 .team-inline { min-width: 0; }
+.award-card h3 .team-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A tile titled with a team (draft grades, trade calculator) reads as a name. */
 .award-card h3:has(> .team-inline) {
   text-transform: none;
@@ -858,9 +863,8 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
   color: var(--text-primary);
 }
 .grade-stats {
-  display: grid;
-  grid-template-columns: repeat(3, auto);
-  justify-content: start;
+  display: flex;
+  flex-wrap: wrap;
   gap: 0 1rem;
   margin: 0.35rem 0 0.25rem;
   font-variant-numeric: tabular-nums;
@@ -997,6 +1001,7 @@ summary:has(.summary-aside)::after { margin-left: 0.75rem; }
 /* On phones, the verdict follows you down the rosters. */
 .trade-summary { display: none; }
 @media (max-width: 639px) {
+  html:has(.trade-summary:not(:empty)) { scroll-padding-bottom: 4.5rem; }
   .trade-summary:not(:empty) {
     display: flex;
     align-items: center;

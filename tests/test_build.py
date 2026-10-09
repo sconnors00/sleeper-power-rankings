@@ -654,3 +654,30 @@ def test_dark_tokens_in_sync():
     picked_dark = _css_tokens(css, ':root[data-theme="dark"]')
     assert os_dark and os_dark == picked_dark
     assert set(os_dark) <= set(light)
+
+
+def test_week_pager_only_when_there_is_another_week(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    """A season with one week page has nowhere to page to: no empty <nav>."""
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    assert '<nav class="pager"' not in (out / "index.html").read_text()
+
+    season.playoff_week_start = 6  # the season recap becomes week 6
+    render_site(season, tmp_path / "recap")
+    week5 = (tmp_path / "recap" / "weeks" / "week-5.html").read_text()
+    assert week5.count('<nav class="pager"') == 2  # under the title and at the bottom
+    assert 'href="../weeks/week-6.html" rel="next">Season recap' in week5
+
+
+def test_season_charts_jump_link_hides_with_the_charts(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "season.html").read_text()
+    assert '<a href="#charts" class="chart-only">Charts</a>' in html
+    assert '<section id="charts" class="chart-only">' in html

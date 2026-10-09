@@ -60,9 +60,13 @@ var FFPR_UTIL = (function () {
       select.addEventListener("keydown", function (e) {
         if (e.key === "Enter") {
           if (select.value) window.location.href = select.value;
-        } else {
-          keyed = /^(Arrow|Page|Home|End)/.test(e.key) || e.key.length === 1;
+          return;
         }
+        // A closed select changes value inside this keydown; clear the flag
+        // right after, so a pick from an opened dropdown (Space, Alt+Down,
+        // macOS arrows) or a later mouse pick still navigates.
+        keyed = !e.altKey && (/^(Arrow|Page|Home|End)/.test(e.key) || (e.key.length === 1 && e.key !== " "));
+        setTimeout(function () { keyed = false; }, 0);
       });
       select.addEventListener("change", function () {
         if (!keyed && select.value) window.location.href = select.value;
@@ -194,13 +198,18 @@ var FFPR_UTIL = (function () {
       pointBackgroundColor: shade,
       pointBorderColor: shade,
       borderWidth: function (ctx) { return focused(ctx.chart) === ctx.datasetIndex ? 3.5 : 2; },
-      pointRadius: function (ctx) { return context && !on(ctx) ? 0 : 2.5; },
+      // context lines drop their dots, unless one week means there are no lines
+      pointRadius: function (ctx) { return context && !on(ctx) && data.length > 1 ? 0 : 2.5; },
       pointHoverRadius: 6,
       spanGaps: true,
     };
   }
 
   // Each team's name at the end of its line, so the lines need no legend.
+  // Narrow charts shorten long names.
+  function endLabel(name, narrow) {
+    return narrow && name.length > 11 ? name.slice(0, 10) + "…" : name;
+  }
   var endLabels = {
     id: "endLabels",
     afterDatasetsDraw: function (chart) {
@@ -216,8 +225,7 @@ var FFPR_UTIL = (function () {
         var f = focused(chart);
         c.globalAlpha = f == null || f === i ? 1 : 0.35;
         c.fillStyle = C.secondary;
-        var text = narrow && ds.label.length > 11 ? ds.label.slice(0, 10) + "…" : ds.label;
-        c.fillText(text, last.x + 8, last.y);
+        c.fillText(endLabel(ds.label, narrow), last.x + 8, last.y);
       });
       c.restore();
     },
@@ -266,17 +274,23 @@ var FFPR_UTIL = (function () {
         return teamLine(rid, rt.series[rid].slice(0, weeks.length));
       });
       var n = datasets.length;
-      // room on the right for the longest end label
+      // room on the right for the longest end label, as endLabels draws it
       var c = canvas.getContext("2d");
       c.font = "500 11px " + C.font;
-      var widest = datasets.reduce(function (w, ds) { return Math.max(w, c.measureText(ds.label).width); }, 0);
-      var room = Math.min(widest + 14, canvas.parentNode.clientWidth < 480 ? 76 : 180);
+      function widest(narrow) {
+        return datasets.reduce(function (w, ds) {
+          return Math.max(w, c.measureText(endLabel(ds.label, narrow)).width);
+        }, 0);
+      }
+      var room = { narrow: widest(true) + 12, wide: Math.min(widest(false) + 14, 180) };
       return {
         type: "line",
         data: { labels: weekLabels(weeks), datasets: datasets },
         plugins: [clearHighlightOnLeave, endLabels],
         options: {
-          layout: { padding: { right: room } },
+          layout: {
+            padding: function (ctx) { return { right: ctx.chart.width < 480 ? room.narrow : room.wide }; },
+          },
           interaction: { mode: "nearest", intersect: false },
           onHover: highlightOnHover,
           scales: {
@@ -351,7 +365,7 @@ var FFPR_UTIL = (function () {
         backgroundColor: C.secondary,
         borderDash: [6, 4],
         borderWidth: 1.5,
-        pointRadius: 0,
+        pointRadius: wp.weeks.length > 1 ? 0 : 3,
       });
       return {
         type: "line",
@@ -942,10 +956,11 @@ var FFPR_UTIL = (function () {
     picks.forEach(function (pid) {
       var btn = h("button", "btn", [PLAYERS[pid].name + " (" + fmt(PLAYERS[pid].value) + ")"]);
       btn.type = "button";
-      btn.addEventListener("click", function () {
+      btn.addEventListener("click", function (e) {
         toggle(s, pid, true);
+        // keyboard users land on the new chip; a click (detail > 0) stays put
         var chips = sides[s].el.querySelectorAll(".trade-chip");
-        if (chips.length) chips[chips.length - 1].focus();
+        if (chips.length) chips[chips.length - 1].focus({ preventScroll: e.detail > 0 });
       });
       p.appendChild(btn);
     });
@@ -953,7 +968,7 @@ var FFPR_UTIL = (function () {
   }
 
   function valueBar(a) {
-    var bar = h("div", "trade-bar");
+    var bar = h("span", "trade-bar");
     [0, 1].forEach(function (i) {
       var seg = h("span");
       seg.style.flexGrow = String(a.gets[i]);
@@ -991,10 +1006,12 @@ var FFPR_UTIL = (function () {
     ]));
     status.textContent = headline(a.verdict) + ". Lineup fit: " + fitLine(a.teams) + ".";
     announced = true;
-    var jump = h("button", null, [headline(a.verdict), valueBar(a)]);
+    var jump = h("button", null, [headline(a.verdict), h("span", "sr-only", ["— show details"]), valueBar(a)]);
     jump.type = "button";
-    jump.setAttribute("aria-label", "Show the verdict");
-    jump.addEventListener("click", function () { result.scrollIntoView({ behavior: "smooth", block: "start" }); });
+    jump.addEventListener("click", function () {
+      var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      result.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+    });
     summary.appendChild(jump);
     result.appendChild(h("div", "trade-teams", a.teams.map(teamCard)));
     var hint = suggestions(a);

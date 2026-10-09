@@ -16,7 +16,7 @@
   ("playoff-odds", "Playoff odds") if season.playoff_odds else none,
   ("leaders", "Leaders"),
   ("records", "Records"),
-  ("charts", "Charts"),
+  ("charts", "Charts", "chart-only"),
   ("lineups", "Lineups") if board.lineup_leaderboard else none,
   ("pickups", "Pickups") if has_pickups else none,
 ] | select | list) }}
@@ -113,7 +113,7 @@
 <section class="chart-only">
   <h2>Weekly scoring spread</h2>
   <p class="note">Each week's lowest to highest score, with the median.</p>
-  {{ ui.chart("chart-scoring-spread", "Range chart of each week's lowest, median and highest team score") }}
+  {{ ui.chart("chart-scoring-spread", "Range chart of each week's lowest, median and highest team score", tall=true) }}
 </section>
 
 <section class="chart-only">

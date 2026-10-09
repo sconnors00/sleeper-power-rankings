@@ -116,10 +116,12 @@
 </div>
 {%- endmacro %}
 
-{# Jump links to a page's sections: a list of (id, label) pairs. #}
+{# Jump links to a page's sections: a list of (id, label) pairs, or
+   (id, label, class) to style a link like its section (e.g. "chart-only",
+   so the link hides when the charts do). #}
 {% macro toc(items, label="On this page", wrap=false) -%}
 <nav class="page-toc{% if wrap %} page-toc-wrap{% endif %}" aria-label="{{ label }}">
-  {% for id, text in items %}<a href="#{{ id }}">{{ text }}</a>{% endfor %}
+  {% for item in items %}<a href="#{{ item[0] }}"{% if item | length > 2 %} class="{{ item[2] }}"{% endif %}>{{ item[1] }}</a>{% endfor %}
 </nav>
 {%- endmacro %}
 
@@ -139,7 +141,7 @@
 
 {# Previous/next links for the page showing week `current`. #}
 {% macro week_pager(current, label="Weeks") -%}
-{% if current in all_weeks %}
+{% if current in all_weeks and all_weeks | length > 1 %}
 {% set i = all_weeks.index(current) %}
 <nav class="pager" aria-label="{{ label }}">
   {% if i > 0 %}{% set w = all_weeks[i - 1] %}<a class="pager-prev" href="{{ asset_prefix }}{{ week_url(w) }}" rel="prev">&lsaquo; {{ week_label(w) }}</a>{% endif %}
