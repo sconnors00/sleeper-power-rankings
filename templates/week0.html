@@ -1,6 +1,12 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% set active_page = "week" %}
+{% set current_week = 0 %}
 {% block title %}Preseason &middot; {{ league_name }}{% endblock %}
 {% block content %}
-<h1 class="page-title">Preseason</h1>
+<div class="page-head">
+  <h1 class="page-title">Preseason</h1>
+  {{ ui.week_pager(0) }}
+</div>
 {% include "_preseason_table.html" %}
 {% endblock %}

@@ -87,7 +87,7 @@ skipped.
 
 ### Roster moves
 
-Each week page has a "Roster moves" table (right after power rankings):
+Each week page ends with a "Roster moves" table:
 every team's adds and drops that week, sourced from Sleeper's transactions
 log for that week (waivers with the FAAB bid, free agent pickups, trades).
 Failed transactions (an outbid claim, a vetoed trade) never happened, so
@@ -161,7 +161,7 @@ Regular season only.
 `ffpr build` always walks the league's `previous_league_id` chain and builds
 every past season too, each into its own `site/<year>/` (fully
 self-contained: own `data.js`, own `static/`), alongside the current season
-at `site/` root. Every page gets a "Season" dropdown next to the week picker
+at `site/` root. Every page gets a "Season" dropdown in the header
 for jumping between years. Past seasons build with their own draft grades
 (if that season had a completed auction) but never pre-season rankings or a
 provisional week -- those only make sense for the current, in-progress
@@ -215,3 +215,20 @@ uv run ruff format . # format
 `tests/fixtures/` holds real (trimmed) Sleeper API responses from one week of
 a past season so `compute.py` and `build.py` can be tested without hitting
 the network.
+
+### Changing the look
+
+- **Colors and spacing** are tokens at the top of `static/style.css` (light
+  theme, then dark). The charts in `static/app.js` read the same tokens, so a
+  palette change is made in one place. Visitors can switch between light,
+  dark and their device's setting with the button in the header.
+- **Navigation** is the `nav` list at the top of `templates/base.html`: one
+  line per page (key, file, label, whether it's shown). A page highlights its
+  own entry with `{% set active_page = "<key>" %}`.
+- **Shared pieces** (team names with avatars, rank badges, award tiles,
+  movement arrows, percentage bars, jump links, the week pager) are macros in
+  `templates/_macros.html`. Templates import them with
+  `{% import "_macros.html" as ui with context %}`.
+- Every top-level `<section>` in a page renders as a card; wrap two in
+  `<div class="card-row">` to put them side by side on wide screens. Add
+  `class="num"` to a numeric column's `<th>` and `<td>`s to right-align it.

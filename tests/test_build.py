@@ -135,7 +135,8 @@ def test_render_site_writes_week0_when_preseason_present(tmp_path, teams_only_se
     assert (out / "weeks" / "week-0.html").exists()
     html = (out / "weeks" / "week-0.html").read_text()
     assert "Pre-season power rankings" in html
-    assert '<option value="../weeks/week-0.html">Preseason</option>' in html
+    # the week picker names the page it's on
+    assert '<option value="../weeks/week-0.html" selected>Preseason</option>' in html
 
 
 def test_render_site_no_week0_without_preseason_data(tmp_path, teams_only_season):
@@ -161,7 +162,7 @@ def test_render_site_writes_season_recap_when_complete(
     assert "Lowest scoring active player" in html
     assert "Closest game of the year" in html
     assert "Biggest blowout of the year" in html
-    assert '<option value="../weeks/week-6.html">Season recap</option>' in html
+    assert '<option value="../weeks/week-6.html" selected>Season recap</option>' in html
 
 
 def test_render_site_no_season_recap_when_incomplete(
@@ -228,7 +229,7 @@ def test_week_page_shows_position_rankings(
     html = (out / "weeks" / "week-5.html").read_text()
     section = html.split("<h2>Position rankings</h2>")[1].split("</section>")[0]
     for pos in ("QB", "RB", "WR", "TE", "K", "DEF"):
-        assert f"<th>{pos}</th>" in section
+        assert f'<th class="num">{pos}</th>' in section
     assert section.count("team-cell") == len(rosters)
     assert "pos-best" in section and "pos-worst" in section
 
@@ -586,7 +587,7 @@ def test_trade_values_show_availability_with_weeks_left(
     out = tmp_path / "site"
     render_site(season, out)
     values = (out / "trades.html").read_text().split('id="values"')[1].split("</section>")[0]
-    assert "<th>Avail.</th>" in values and "of the 3 weeks left, playoffs included," in values
+    assert ">Avail.</th>" in values and "of the 3 weeks left, playoffs included," in values
 
     section = (out / "how-it-works.html").read_text().split('id="trade-values"')[1]
     top = max(

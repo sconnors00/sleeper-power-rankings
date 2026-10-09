@@ -1,44 +1,58 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% set active_page = "rosters" %}
 {% block title %}Rosters &middot; {{ league_name }}{% endblock %}
 {% block content %}
 
-<h1 class="page-title">Rosters &amp; FAAB</h1>
-<p class="lede">Every team's lineup, bench, IR and taxi squad{% if report.faab_budget %}, and how much of the ${{ report.faab_budget }} FAAB budget each has left{% endif %}. The same data is available as JSON for scripts: <a href="rosters.json">rosters.json</a>.</p>
+<div class="page-head">
+  <h1 class="page-title">Rosters &amp; FAAB</h1>
+  <p class="lede">Every team's lineup, bench, IR and taxi squad{% if report.faab_budget %}, and how much of the ${{ report.faab_budget }} FAAB budget each has left{% endif %}. The same data is available as JSON for scripts: <a href="rosters.json">rosters.json</a>.</p>
+</div>
+
+<nav class="page-toc" aria-label="Teams">
+  {% if report.faab_budget %}<a href="#faab">FAAB</a>{% endif %}
+  {% for t in report.teams %}<a href="#team-{{ t.roster_id }}">{{ teams[t.roster_id].name }}</a>{% endfor %}
+</nav>
 
 {% if report.faab_budget %}
 <section id="faab">
   <h2>FAAB</h2>
+  <p class="note">Remaining is the budget minus what Sleeper says each team has used, so it includes FAAB traded between teams.</p>
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Team</th><th>Remaining</th><th>Spent</th><th>Winning bids</th></tr></thead>
+    <thead><tr><th>Team</th><th>Remaining</th><th class="num">Spent</th><th class="num">Winning bids</th></tr></thead>
     <tbody>
       {% for t in report.teams | sort(attribute="faab_remaining", reverse=True) %}
       <tr>
-        <td class="team-cell"><span class="team-swatch" style="background:{{ teams[t.roster_id].color }}"></span><a href="#team-{{ t.roster_id }}">{{ teams[t.roster_id].name }}</a></td>
-        <td><strong>${{ t.faab_remaining }}</strong></td>
-        <td>${{ t.faab_used }}</td>
-        <td>{{ t.claims | length }}</td>
+        {{ ui.team_cell(teams[t.roster_id], href="#team-" ~ t.roster_id) }}
+        <td><strong>{{ ui.meter(t.faab_remaining / report.faab_budget, "$" ~ t.faab_remaining) }}</strong></td>
+        <td class="num">${{ t.faab_used }}</td>
+        <td class="num">{{ t.claims | length }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
-  <p class="note">Remaining is the budget minus what Sleeper says each team has used, so it includes FAAB traded between teams.</p>
 </section>
 {% endif %}
 
+<div class="card-row">
 {% for t in report.teams %}
 {% set team = teams[t.roster_id] %}
 <section id="team-{{ t.roster_id }}">
-  <h2 class="team-cell"><span class="team-swatch" style="background:{{ team.color }}"></span>{{ team.name }} <span class="note-inline">{{ t.record }}{% if report.faab_budget %} &middot; ${{ t.faab_remaining }} FAAB left{% endif %}</span></h2>
+  <div class="section-head">
+    <h2>{{ ui.team_inline(team) }}</h2>
+    <span class="note-inline">{{ t.record }}{% if report.faab_budget %} &middot; ${{ t.faab_remaining }} FAAB left{% endif %}</span>
+  </div>
   <div class="table-scroll">
   <table class="data-table">
     <thead><tr><th>Slot</th><th>Player</th><th>Pos</th><th>NFL</th></tr></thead>
     <tbody>
       {% for group in (t.starters, t.bench, t.ir, t.taxi) %}
+      {% set outer = loop %}
       {% for p in group %}
-      <tr>
-        <td>{{ p.slot }}</td>
+      <tr{% if loop.first and not outer.first %} class="group-start"{% endif %}>
+        <td><span class="slot slot-{{ p.slot | lower }}">{{ p.slot }}</span></td>
         <td>{{ p.name }}{% if p.injury %} <span class="inj">{{ p.injury[:3] | upper if p.injury != "Questionable" else "Q" }}</span>{% endif %}</td>
         <td>{{ p.position }}</td>
         <td>{{ p.nfl_team or "FA" }}</td>
@@ -50,13 +64,13 @@
   </div>
   {% if t.claims %}
   <details class="fold">
-    <summary>Waiver claims won <span class="note-inline">{{ t.claims | length }}</span></summary>
+    <summary>Waiver claims won <span class="summary-aside">{{ t.claims | length }}</span></summary>
     <div class="table-scroll">
     <table class="data-table">
-      <thead><tr><th>Wk</th><th>Player</th><th>Bid</th><th>Dropped</th></tr></thead>
+      <thead><tr><th class="num">Wk</th><th>Player</th><th class="num">Bid</th><th>Dropped</th></tr></thead>
       <tbody>
         {% for c in t.claims %}
-        <tr><td>{{ c.week }}</td><td>{{ c.player.name }} <span class="note-inline">{{ c.player.position }}</span></td><td>${{ c.bid }}</td><td>{{ c.dropped | join(", ") or "&mdash;" | safe }}</td></tr>
+        <tr><td class="num">{{ c.week }}</td><td>{{ c.player.name }} <span class="note-inline">{{ c.player.position }}</span></td><td class="num">${{ c.bid }}</td><td>{{ c.dropped | join(", ") or "&mdash;" | safe }}</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -65,5 +79,6 @@
   {% endif %}
 </section>
 {% endfor %}
+</div>
 
 {% endblock %}
