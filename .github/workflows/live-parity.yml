@@ -1,0 +1,100 @@
+# Temporary: checks the Rust port against the last Python commit on live
+# Sleeper data. Remove once the port has been verified.
+name: Live parity (temporary)
+
+on:
+  push:
+    branches: [claude/codebase-rewrite-rust-zb9ydb]
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Rust checks
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+          cargo build --release
+      - name: Python reference (last Python commit)
+        run: |
+          git worktree add "$RUNNER_TEMP/pyref" 3a4c3d2
+          cd "$RUNNER_TEMP/pyref" && uv sync
+      - name: Build with Python, Rust, then Python again
+        run: |
+          PY="uv run --project $RUNNER_TEMP/pyref ffpr"
+          RS="$GITHUB_WORKSPACE/target/release/ffpr"
+          for run in python1 rust python2 rust-provisional; do
+            mkdir -p runs/$run && cp config.toml runs/$run/
+          done
+          (cd runs/python1 && $PY build && $PY blurb > blurb.txt)
+          (cd runs/rust && $RS build && $RS blurb > blurb.txt)
+          (cd runs/python2 && $PY build && $PY blurb > blurb.txt)
+          (cd runs/rust-provisional && $RS build --provisional)
+      - name: Compare
+        run: |
+          python3 - <<'PY'
+          import difflib, json, re, sys
+          from collections import OrderedDict
+          from pathlib import Path
+
+          VERSION = re.compile(r"\?v=[0-9a-f]{12}")
+
+          def normalize(rel, text):
+              if rel.endswith("data.js"):
+                  payload = json.loads(text[len("window.FFPR = "):-2], object_pairs_hook=OrderedDict)
+                  trade = payload.get("trade")
+                  if trade:
+                      trade["replacement"] = OrderedDict(sorted(trade["replacement"].items()))
+                  return json.dumps(payload, indent=1)
+              return VERSION.sub("?v=X", text)
+
+          def tree(root):
+              files = {p.relative_to(root).as_posix(): p for p in root.rglob("*") if p.is_file()}
+              return {rel: p for rel, p in files.items() if rel.startswith("site/") or rel == "blurb.txt"}
+
+          def compare(name_a, name_b):
+              a, b = tree(Path("runs") / name_a), tree(Path("runs") / name_b)
+              missing, extra = sorted(set(a) - set(b)), sorted(set(b) - set(a))
+              differing = []
+              for rel in sorted(set(a) & set(b)):
+                  ta = normalize(rel, a[rel].read_text())
+                  tb = normalize(rel, b[rel].read_text())
+                  if ta != tb:
+                      differing.append(rel)
+                      diff = list(difflib.unified_diff(ta.splitlines(), tb.splitlines(), name_a, name_b, n=1, lineterm=""))
+                      print(f"--- {rel}")
+                      for line in diff[:40]:
+                          print(line[:240])
+              print(f"{name_a} vs {name_b}: {len(a)} vs {len(b)} files, missing={missing}, extra={extra}, differing={len(differing)}")
+              return not (missing or extra or differing)
+
+          drift_free = compare("python1", "python2")
+          print("live data changed between the two Python runs" if not drift_free else "live data was stable across the runs")
+          same = compare("python1", "rust")
+          sys.exit(0 if same or not drift_free else 1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-parity-sites
+          retention-days: 3
+          path: |
+            runs/python1/site
+            runs/rust/site
+            runs/rust-provisional/site
+            runs/python1/blurb.txt
+            runs/rust/blurb.txt
