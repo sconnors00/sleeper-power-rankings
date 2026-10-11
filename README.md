@@ -8,7 +8,7 @@ HTML/CSS/JS, rebuilt from scratch on every run and hosted with GitHub Pages.
 
 ## Setup
 
-Requires a stable [Rust toolchain](https://rustup.rs) (1.82 or newer).
+Requires a stable [Rust toolchain](https://rustup.rs) (1.87 or newer).
 
 ```bash
 git clone https://github.com/sconnors00/sleeper-power-rankings.git
