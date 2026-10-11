@@ -72,7 +72,7 @@
 {# Previous/next links for the page showing week `current`. #}
 {% macro week_pager(current) -%}
 {% if current in all_weeks %}
-{% set i = all_weeks.index(current) %}
+{% set i = index_of(all_weeks, current) %}
 <nav class="pager" aria-label="Weeks">
   {% if i > 0 %}{% set w = all_weeks[i - 1] %}<a class="pager-prev" href="{{ asset_prefix }}{{ week_url(w) }}">&lsaquo; {{ week_label(w) }}</a>{% endif %}
   {% if i + 1 < all_weeks | length %}{% set w = all_weeks[i + 1] %}<a class="pager-next" href="{{ asset_prefix }}{{ week_url(w) }}">{{ week_label(w) }} &rsaquo;</a>{% endif %}

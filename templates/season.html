@@ -26,7 +26,7 @@
     <h2>Playoff odds</h2>
     <a href="how-it-works.html#playoff-odds">How this works</a>
   </div>
-  <p class="note">From {{ "{:,}".format(season.playoff_odds_sims) }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}.</p>
+  <p class="note">From {{ season.playoff_odds_sims | thousands }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}.</p>
   <div class="table-scroll">
   <table class="data-table">
     <thead><tr><th>Team</th><th class="num">Record</th><th class="num">Proj. wins</th><th>Playoffs</th>{% if season.playoff_byes %}<th class="num">Bye</th>{% endif %}<th class="num">#1 seed</th></tr></thead>
@@ -93,8 +93,8 @@
   <table class="data-table">
     <thead><tr><th>Team</th><th class="num">Crowns</th></tr></thead>
     <tbody>
-      {% for rid, count in board.crown_counts.items() | sort(attribute="1", reverse=True) %}
-      <tr>{{ ui.team_cell(teams[rid]) }}<td class="num">{{ "&#128081;" | safe if count }} {{ count }}</td></tr>
+      {% for crown in crown_rows %}
+      <tr>{{ ui.team_cell(teams[crown.roster_id]) }}<td class="num">{{ "&#128081;" | safe if crown.count }} {{ crown.count }}</td></tr>
       {% endfor %}
     </tbody>
   </table>

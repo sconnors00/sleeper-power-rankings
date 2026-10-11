@@ -1,6 +1,6 @@
 # sleeper-power-rankings (ffpr)
 
-A small Python tool that pulls a Sleeper fantasy football league from the
+A small Rust tool that pulls a Sleeper fantasy football league from the
 [Sleeper API](https://docs.sleeper.com) and builds a static, mobile-first web
 page: power rankings, weekly awards, a season scoring board, and a handful of
 Chart.js charts. No servers, no logins, no frontend framework -- plain
@@ -8,12 +8,12 @@ HTML/CSS/JS, rebuilt from scratch on every run and hosted with GitHub Pages.
 
 ## Setup
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+Requires a stable [Rust toolchain](https://rustup.rs) (1.82 or newer).
 
 ```bash
 git clone https://github.com/sconnors00/sleeper-power-rankings.git
 cd sleeper-power-rankings
-uv sync
+cargo build --release   # produces target/release/ffpr
 ```
 
 ### Finding a Sleeper league ID
@@ -31,11 +31,14 @@ that order of precedence: `--league` > env var > `config.toml`).
 ## Usage
 
 ```bash
-uv run ffpr build              # build site/ through the latest completed week
-uv run ffpr build --through 8  # build only through week 8
-uv run ffpr build --provisional  # also include the in-progress week (excluded from rankings)
-uv run ffpr serve              # preview at http://localhost:8000
-uv run ffpr blurb              # print a chat-ready recap of the latest week
+ffpr build              # build site/ through the latest completed week
+ffpr build --through 8  # build only through week 8
+ffpr build --provisional  # also include the in-progress week (excluded from rankings)
+ffpr serve              # preview at http://localhost:8000
+ffpr blurb              # print a chat-ready recap of the latest week
+
+# ffpr is target/release/ffpr; or run it straight from the source tree:
+cargo run --release -- build
 ```
 
 Every command accepts `--league <id>` and `--season <year>` overrides.
@@ -176,8 +179,8 @@ to the repo -- every run rebuilds `site/` from scratch from the Sleeper API.
 
 ## GitHub setup (one-time, manual)
 
-This repo ships `.github/workflows/build.yml`, which installs `uv`, runs
-`ffpr build`, and publishes `site/` to GitHub Pages. You need to configure
+This repo ships `.github/workflows/build.yml`, which builds the release binary,
+runs `ffpr build`, and publishes `site/` to GitHub Pages. You need to configure
 two things in the GitHub UI:
 
 1. **Repo secret** -- **Settings > Secrets and variables > Actions > New
@@ -207,14 +210,40 @@ entirely.
 ## Development
 
 ```bash
-uv run pytest        # unit tests + a build smoke test, against committed fixtures
-uv run ruff check .  # lint
-uv run ruff format . # format
+cargo test                            # unit, compute, cache, render and CLI tests
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all                       # format (CI checks with --check)
 ```
 
 `tests/fixtures/` holds real (trimmed) Sleeper API responses from one week of
-a past season so `compute.py` and `build.py` can be tested without hitting
-the network.
+a past season so the computations and pages can be tested without hitting the
+network. The CLI tests run the real binary against a local stand-in for the
+Sleeper API that serves those fixtures.
+
+`SLEEPER_API_BASE` and `SLEEPER_SCHEDULE_BASE` override the API root and the NFL
+schedule root, which is how those tests (and any offline mirror) point the
+build somewhere else.
+
+### Layout
+
+```
+src/
+  main.rs       # the ffpr command line (build, serve, blurb)
+  pipeline.rs   # fetches and assembles a season, best-effort where it can be
+  sleeper.rs    # read-only API client with the raw-response cache under data/
+  raw.rs        # typed views of the Sleeper responses
+  models.rs     # the computed season: teams, weeks, board, trades, rosters
+  compute/      # pure functions: awards, rankings, playoffs, trades, drafts
+  build/        # renders site/: page contexts, data.js, rosters.json, templates
+  pyrand.rs     # Python's random module, so simulated odds match exactly
+  pyjson.rs     # Python's json.dumps formatting, so data.js matches byte for byte
+templates/      # Jinja2-syntax pages, rendered by minijinja (compiled in)
+static/         # style.css and app.js (compiled in, copied into site/)
+tests/          # integration tests and fixtures
+```
+
+The templates and static files are embedded in the binary at compile time, so
+`site/` is self-contained and the binary runs from any directory.
 
 ### Changing the look
 
