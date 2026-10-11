@@ -6,6 +6,7 @@
 //! are cached as the raw JSON Sleeper sent.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -16,6 +17,9 @@ pub const DEFAULT_BASE_URL: &str = "https://api.sleeper.app/v1";
 /// schedule from. Used only for bye weeks, so a failure costs nothing but those.
 pub const DEFAULT_SCHEDULE_BASE: &str = "https://api.sleeper.com/schedule/nfl/regular";
 const PLAYERS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+/// The largest response body read. /players/nfl is well over 10 MB; this
+/// leaves plenty of room while still bounding a runaway response.
+const MAX_RESPONSE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct SleeperError(pub String);
@@ -99,10 +103,15 @@ impl SleeperClient {
             .get(url)
             .call()
             .map_err(|e| SleeperError(format!("GET {url} failed: {e}")))?;
-        let text = response
-            .into_string()
+        // Read the body ourselves: ureq's into_string() refuses anything over
+        // 10 MB, and /players/nfl is bigger than that.
+        let mut body = Vec::new();
+        response
+            .into_reader()
+            .take(MAX_RESPONSE_BYTES)
+            .read_to_end(&mut body)
             .map_err(|e| SleeperError(format!("GET {url} unreadable: {e}")))?;
-        serde_json::from_str(&text).map_err(|e| SleeperError(format!("GET {url} bad JSON: {e}")))
+        serde_json::from_slice(&body).map_err(|e| SleeperError(format!("GET {url} bad JSON: {e}")))
     }
 
     fn fetch(&self, path: &str) -> Result<Value> {

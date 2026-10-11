@@ -133,3 +133,18 @@ fn the_nfl_schedule_is_fetched_once() {
     assert_eq!(client.get_nfl_schedule("2025").unwrap(), schedule);
     assert_eq!(api.hits.lock().unwrap()[&url], 1);
 }
+
+#[test]
+fn a_players_map_over_ten_megabytes_is_read_whole() {
+    // The real /players/nfl response is larger than ureq's 10 MB into_string()
+    // limit, which once failed every live build.
+    let padding = "x".repeat(12 * 1024 * 1024);
+    let players = json!({"4046": {"full_name": "Patrick Mahomes", "notes": padding}});
+    let api = serve_routes(BTreeMap::from([("/v1/players/nfl".to_string(), players)]));
+    let dir = tempfile::tempdir().expect("temp dir");
+    let client = SleeperClient::with_base_urls(dir.path(), &api.base, &api.schedule_base);
+
+    let fetched = client.get_players().expect("large response is read");
+    assert_eq!(fetched["4046"]["full_name"], "Patrick Mahomes");
+    assert!(dir.path().join("players_nfl.json").exists());
+}
