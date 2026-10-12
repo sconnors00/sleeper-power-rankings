@@ -16,8 +16,9 @@ pub struct Highlights<'a> {
 }
 
 pub fn build_rivalries(seasons: &[SeasonSummary]) -> Vec<Manager> {
-    // owner -> (display name, color), from the latest season they appear in.
-    let mut profile: BTreeMap<String, (String, String)> = BTreeMap::new();
+    // owner -> (display name, (color, dark color)), from the latest season they
+    // appear in.
+    let mut profile: BTreeMap<String, (String, (String, String))> = BTreeMap::new();
     let mut ordered: Vec<&SeasonSummary> = seasons.iter().collect();
     ordered.sort_by(|a, b| b.season.cmp(&a.season));
 
@@ -31,7 +32,7 @@ pub fn build_rivalries(seasons: &[SeasonSummary]) -> Vec<Manager> {
                         .clone()
                         .filter(|n| !n.is_empty())
                         .unwrap_or_else(|| team.name.clone());
-                    (name, team.color.clone())
+                    (name, (team.color.clone(), team.color_dark.clone()))
                 });
             }
         }
@@ -97,7 +98,7 @@ pub fn build_rivalries(seasons: &[SeasonSummary]) -> Vec<Manager> {
                 .then(b.wins.cmp(&a.wins))
                 .then_with(|| a.opponent_id.cmp(&b.opponent_id))
         });
-        let (name, color) = profile[owner].clone();
+        let (name, colors) = profile[owner].clone();
         let mut played: Vec<String> = rivals
             .iter()
             .flat_map(|h| h.meetings.iter().map(|m| m.season.clone()))
@@ -105,7 +106,7 @@ pub fn build_rivalries(seasons: &[SeasonSummary]) -> Vec<Manager> {
         played.sort();
         played.dedup();
         played.reverse();
-        managers.push(Manager::new(owner.clone(), name, color, played, rivals));
+        managers.push(Manager::new(owner.clone(), name, colors, played, rivals));
     }
     managers.sort_by(|a, b| {
         b.win_pct

@@ -43,7 +43,6 @@ fn render(season: &SeasonSummary, out: &Path) {
     let all = vec![season.season.clone()];
     let rivalries = ffpr::compute::rivalries::build_rivalries(std::slice::from_ref(season));
     let opts = SiteOptions {
-        site_url: SITE_URL,
         all_seasons: &all,
         site_root_prefix: "",
         rivalries: &rivalries,
@@ -117,6 +116,10 @@ fn data_js_is_a_pure_ascii_payload_with_the_week_series() {
         parsed.get("trade").is_none(),
         "past seasons have no trade calculator"
     );
+    assert_eq!(parsed["teams"]["1"]["colorDark"], "#3987e5");
+    // Five regular-season weeks, no median games.
+    assert_eq!(parsed["luck"][0]["games"], 5);
+    assert!(parsed.get("benchPoints").is_none());
 }
 
 #[test]
@@ -237,4 +240,68 @@ fn the_trade_worked_example_rounds_its_share_like_python() {
         "{page:.0}"
     );
     assert!(!page.contains("81.3%"));
+}
+
+/// The `--custom-property: value` pairs declared in `selector { ... }`.
+fn css_tokens(css: &str, selector: &str) -> std::collections::BTreeMap<String, String> {
+    let mut body = css
+        .split_once(&format!("{selector} {{"))
+        .map(|(_, rest)| rest.split('}').next().unwrap_or("").to_string())
+        .unwrap_or_else(|| panic!("style.css has a {selector} block"));
+    while let Some(start) = body.find("/*") {
+        let end = body[start..]
+            .find("*/")
+            .map_or(body.len(), |i| start + i + 2);
+        body.replace_range(start..end, "");
+    }
+    body.split(';')
+        .filter_map(|decl| decl.trim().split_once(':'))
+        .filter(|(name, _)| name.starts_with("--"))
+        .map(|(name, value)| (name.to_string(), value.trim().to_string()))
+        .collect()
+}
+
+#[test]
+fn the_dark_theme_tokens_stay_in_sync() {
+    // style.css writes the dark theme twice (follow-the-OS, and the theme
+    // button's explicit choice); a token added to one block must be in both.
+    let css = read(&Path::new(env!("CARGO_MANIFEST_DIR")).join("static/style.css"));
+    let light = css_tokens(&css, ":root");
+    let os_dark = css_tokens(&css, ":root:not([data-theme=\"light\"])");
+    let picked_dark = css_tokens(&css, ":root[data-theme=\"dark\"]");
+    assert!(!os_dark.is_empty());
+    assert_eq!(os_dark, picked_dark);
+    assert!(os_dark.keys().all(|token| light.contains_key(token)));
+}
+
+#[test]
+fn the_week_pager_shows_only_when_there_is_another_week() {
+    let data = tempfile::tempdir().unwrap();
+    let season = fixture_season(data.path());
+
+    // A season with one week page has nowhere to page to: no empty <nav>.
+    let mut single = season.clone();
+    single.weeks.drain(..single.weeks.len() - 1);
+    let out = tempfile::tempdir().unwrap();
+    render(&single, out.path());
+    assert!(!read(&out.path().join("index.html")).contains("<nav class=\"pager\""));
+
+    // With the regular season over, the recap is the page after the last week.
+    let mut complete = season;
+    complete.playoff_week_start = 6;
+    let out = tempfile::tempdir().unwrap();
+    render(&complete, out.path());
+    let week5 = read(&out.path().join("weeks/week-5.html"));
+    assert_eq!(week5.matches("<nav class=\"pager\"").count(), 2);
+    assert!(week5.contains("href=\"../weeks/week-6.html\" rel=\"next\">Season recap"));
+}
+
+#[test]
+fn the_season_charts_jump_link_hides_with_the_charts() {
+    let data = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    render(&fixture_season(data.path()), out.path());
+    let html = read(&out.path().join("season.html"));
+    assert!(html.contains("<a href=\"#charts\" class=\"chart-only\">Charts</a>"));
+    assert!(html.contains("<section id=\"charts\" class=\"chart-only\">"));
 }

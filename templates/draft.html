@@ -5,22 +5,23 @@
 {% macro pick_table(rows, tone) -%}
 <div class="table-scroll">
 <table class="data-table">
-  <thead><tr><th>Player</th><th>Pos</th><th>Team</th><th class="num">Paid</th><th class="num">Value</th><th class="num">Surplus</th></tr></thead>
+  <thead><tr><th>Player</th><th class="num">Surplus</th><th class="num">Paid</th><th class="num">Value</th><th>Pos</th><th>Team</th></tr></thead>
   <tbody>
     {% for g in rows %}
     <tr>
       <td>{{ g.player.name }}</td>
-      <td>{{ g.player.position }}</td>
-      {{ ui.team_cell(teams[g.roster_id]) }}
+      <td class="num {{ tone }}"><strong>{{ "%+.2f" | format(g.surplus) }}</strong></td>
       <td class="num">${{ g.amount }}</td>
       <td class="num">{{ g.expected | fmt2 }}</td>
-      <td class="num {{ tone }}"><strong>{{ "%+.2f" | format(g.surplus) }}</strong></td>
+      <td>{{ g.player.position }}</td>
+      {{ ui.team_cell(teams[g.roster_id]) }}
     </tr>
     {% endfor %}
   </tbody>
 </table>
 </div>
 {%- endmacro %}
+{% set grade_tone = {"a": "good", "b": "", "c": "warn", "d": "bad"} %}
 {% block content %}
 
 <div class="page-head">
@@ -33,29 +34,27 @@
   </p>
 </div>
 
-<div class="awards-grid">
-  {% for t in draft.teams %}
-  {% set letter = t.grade[:1] | lower %}
-  <div class="award-card grade-card-{{ letter }}">
-    <h3>{{ ui.team_inline(teams[t.roster_id]) }}</h3>
-    <p class="award-value grade grade-{{ letter }}">{{ t.grade }}</p>
-    <p class="award-teams">
-      spent ${{ t.spent }} &middot; value {{ t.value | fmt2 }}
-      &middot; surplus <span class="{{ 'up' if t.surplus >= 0 else 'down' }}">{{ "%+.2f" | format(t.surplus) }}</span>
-    </p>
+<section class="bare">
+  <h2>Team grades</h2>
+  <div class="awards-grid">
+    {% for t in draft.teams %}
+    {% set letter = t.grade[:1] | lower %}
+    {% call ui.award(ui.team_inline(teams[t.roster_id]), t.grade, grade_tone.get(letter, ""), value_class="grade grade-" ~ letter) %}
+    <dl class="grade-stats">
+      <div><dt>Spent</dt><dd>${{ t.spent }}</dd></div>
+      <div><dt>Value</dt><dd>{{ t.value | fmt2 }}</dd></div>
+      <div><dt>Surplus</dt><dd class="{{ 'up' if t.surplus >= 0 else 'down' }}">{{ "%+.2f" | format(t.surplus) }}</dd></div>
+    </dl>
     {% if t.picks %}
-    <p class="award-teams">
-      Best: {{ t.picks[0].player.name }} (${{ t.picks[0].amount }}, {{ "%+.2f" | format(t.picks[0].surplus) }})
-    </p>
+    <p class="award-teams">Best: {{ t.picks[0].player.name }} (${{ t.picks[0].amount }}, {{ "%+.2f" | format(t.picks[0].surplus) }})</p>
     {% endif %}
     {% if t.keepers %}
-    <p class="award-teams note-inline">
-      Keeper{{ "s" if t.keepers | length > 1 }}: {% for k in t.keepers %}{{ k.player.name }} (${{ k.amount }}){% if not loop.last %}, {% endif %}{% endfor %}
-    </p>
+    <p class="award-teams note-inline">Keeper{{ "s" if t.keepers | length > 1 }}: {% for k in t.keepers %}{{ k.player.name }} (${{ k.amount }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
     {% endif %}
+    {% endcall %}
+    {% endfor %}
   </div>
-  {% endfor %}
-</div>
+</section>
 
 <section>
   <h2>Biggest steals</h2>

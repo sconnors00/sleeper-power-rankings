@@ -15,6 +15,8 @@ pub struct Team {
     pub color: String,
     /// The manager's Sleeper display name.
     pub owner_name: Option<String>,
+    /// The same team's color in the dark theme.
+    pub color_dark: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -188,8 +190,8 @@ pub struct SeasonLineupRow {
 #[derive(Debug, Clone, Serialize)]
 pub struct SeasonBoard {
     pub log: Vec<SeasonBoardEntry>,
-    /// (roster_id, crowns) in roster order.
-    pub crown_counts: Vec<(i64, i64)>,
+    /// Crowns won, by roster_id.
+    pub crown_counts: BTreeMap<i64, i64>,
     /// Sorted by PF descending.
     pub pf_leaderboard: Vec<PfLeaderboardRow>,
     pub records: SeasonRecords,
@@ -368,6 +370,8 @@ pub struct Manager {
     /// Sleeper display name as of the latest season they played.
     pub name: String,
     pub color: String,
+    /// The same color in the dark theme.
+    pub color_dark: String,
     /// Newest first.
     pub seasons: Vec<String>,
     /// Most meetings first.
@@ -382,7 +386,7 @@ impl Manager {
     pub fn new(
         owner_id: String,
         name: String,
-        color: String,
+        (color, color_dark): (String, String),
         seasons: Vec<String>,
         rivals: Vec<HeadToHead>,
     ) -> Self {
@@ -399,6 +403,7 @@ impl Manager {
             owner_id,
             name,
             color,
+            color_dark,
             seasons,
             rivals,
             wins,

@@ -22,9 +22,13 @@ pub const PLAYOFF_SIMS: i64 = 10_000;
 /// The last week of the NFL regular season; fantasy playoffs can't run past it.
 pub const NFL_LAST_WEEK: i64 = 18;
 
-/// 12 fixed, stable-order team colors. The first 8 are the validated
+/// 12 fixed, stable-order team colors, with a matching set tuned for the dark
+/// theme (a team keeps the same slot in both). The first 8 are the validated
 /// categorical palette (dataviz skill, references/palette.md); slots 9-12
-/// extend it for a 12-team league.
+/// extend it for a 12-team league. At this series count no ordering clears
+/// the all-pairs CVD floor, so identity never rests on color alone: every
+/// team mark sits next to the team's name, the rank chart labels its lines
+/// directly, and the weekly-points chart highlights one team at a time.
 pub const TEAM_COLORS_LIGHT: [&str; 12] = [
     "#2a78d6", // 1 blue
     "#eb6834", // 2 orange
@@ -38,6 +42,10 @@ pub const TEAM_COLORS_LIGHT: [&str; 12] = [
     "#5ac8c8", // 10 teal
     "#c77dff", // 11 lavender
     "#6b7280", // 12 gray
+];
+pub const TEAM_COLORS_DARK: [&str; 12] = [
+    "#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767",
+    "#a87642", "#4fb3b3", "#b565f0", "#8b93a1",
 ];
 
 /// Which positions each flex-style lineup slot accepts.
@@ -111,6 +119,7 @@ pub fn build_teams(rosters: &[RawRoster], users: &[RawUser]) -> BTreeMap<i64, Te
                 avatar_url: resolve_avatar_url(user),
                 color: TEAM_COLORS_LIGHT[i % TEAM_COLORS_LIGHT.len()].to_string(),
                 owner_name: user.and_then(|u| u.display_name.clone()),
+                color_dark: TEAM_COLORS_DARK[i % TEAM_COLORS_DARK.len()].to_string(),
             },
         );
     }

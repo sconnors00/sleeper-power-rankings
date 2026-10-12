@@ -20,7 +20,6 @@ pub const CHART_JS_SRI: &str =
 
 /// Settings shared by every season written in one build.
 pub struct SiteOptions<'a> {
-    pub site_url: &'a str,
     pub all_seasons: &'a [String],
     /// This season's path back to the site root: "" for the root call.
     pub site_root_prefix: &'a str,
@@ -45,73 +44,79 @@ pub fn render_site(season: &SeasonSummary, output_dir: &Path, opts: &SiteOptions
     let data_js = build_data_js(season);
     write(&output_dir.join("data.js"), &data_js)?;
 
-    let environment = env::environment();
-    let common = context::common(season, &data_js, opts);
-    let render = |name: &str, extra: context::Ctx| -> Result<String> {
-        let template = environment.get_template(name)?;
-        Ok(template.render(context::merge(&common, extra))?)
-    };
-
     let preseason_rows = context::preseason_rows(season);
-    if season.draft.is_some() {
-        let html = render("draft.html", context::draft(season))?;
-        write(&output_dir.join("draft.html"), &html)?;
+    let week_url = |week: i64| format!("weeks/week-{week}.html");
+
+    // Every page this season gets, as (path, template, page context). The nav
+    // shows a page only if it's in this list, so adding a page is one entry.
+    let mut pages: Vec<(String, &str, context::Ctx)> = Vec::new();
+    if let Some(latest) = season.weeks.last() {
+        pages.push((
+            "index.html".into(),
+            "week.html",
+            context::week(season, latest, true),
+        ));
+        pages.push(("season.html".into(), "season.html", context::season(season)));
+    } else {
+        let landing = context::preseason(&preseason_rows);
+        pages.push(("index.html".into(), "landing.html", landing));
     }
     if !season.preseason.is_empty() {
-        let html = render("week0.html", context::preseason_page(&preseason_rows))?;
-        write(&weeks_dir.join("week-0.html"), &html)?;
+        let week0 = context::preseason(&preseason_rows);
+        pages.push((week_url(0), "week0.html", week0));
+    }
+    for wk in season.weeks.iter().chain(&season.provisional_week_summary) {
+        pages.push((
+            week_url(wk.week),
+            "week.html",
+            context::week(season, wk, false),
+        ));
     }
     if crate::pipeline::is_complete(season) {
-        let html = render("season_recap.html", context::recap(season))?;
-        write(
-            &weeks_dir.join(format!("week-{}.html", season.playoff_week_start)),
-            &html,
-        )?;
-    }
-    if !opts.rivalries.is_empty() {
-        let html = render("rivalries.html", context::rivalries(opts.rivalries))?;
-        write(&output_dir.join("rivalries.html"), &html)?;
-    }
-    if context::has_trades_page(season) {
-        let html = render("trades.html", context::trades(season))?;
-        write(&output_dir.join("trades.html"), &html)?;
+        let recap = context::recap(season);
+        pages.push((
+            week_url(season.playoff_week_start),
+            "season_recap.html",
+            recap,
+        ));
     }
     if let Some(report) = &season.roster_report {
-        let html = render("rosters.html", context::rosters(season, report))?;
-        write(&output_dir.join("rosters.html"), &html)?;
+        pages.push((
+            "rosters.html".into(),
+            "rosters.html",
+            context::rosters(report),
+        ));
+    }
+    if context::has_trades_page(season) {
+        pages.push(("trades.html".into(), "trades.html", context::trades(season)));
+    }
+    if season.draft.is_some() {
+        pages.push(("draft.html".into(), "draft.html", context::draft(season)));
+    }
+    if !opts.rivalries.is_empty() {
+        let rivalries = context::rivalries(opts.rivalries);
+        pages.push(("rivalries.html".into(), "rivalries.html", rivalries));
+    }
+    let how = context::how_it_works(season);
+    pages.push(("how-it-works.html".into(), "how_it_works.html", how));
+
+    let environment = env::environment();
+    let built: Vec<String> = pages.iter().map(|(path, _, _)| path.clone()).collect();
+    let common = context::common(season, &data_js, opts, &built);
+    for (path, template, mut ctx) in pages {
+        let depth = path.matches('/').count();
+        ctx.insert("asset_prefix", minijinja::Value::from("../".repeat(depth)));
+        let html = environment
+            .get_template(template)?
+            .render(context::merge(&common, ctx))?;
+        write(&output_dir.join(&path), &html)?;
+    }
+    if season.roster_report.is_some() {
         write(
             &output_dir.join("rosters.json"),
             &build_rosters_json(season),
         )?;
     }
-    let html = render("how_it_works.html", context::how_it_works(season))?;
-    write(&output_dir.join("how-it-works.html"), &html)?;
-
-    if season.weeks.is_empty() {
-        let html = render("landing.html", context::landing(&preseason_rows))?;
-        write(&output_dir.join("index.html"), &html)?;
-        if let Some(prov) = &season.provisional_week_summary {
-            let html = render("week.html", context::week(season, prov, "../", false))?;
-            write(&weeks_dir.join(format!("week-{}.html", prov.week)), &html)?;
-        }
-        return Ok(());
-    }
-
-    for wk in &season.weeks {
-        let html = render("week.html", context::week(season, wk, "../", false))?;
-        write(&weeks_dir.join(format!("week-{}.html", wk.week)), &html)?;
-    }
-    if let Some(prov) = &season.provisional_week_summary {
-        let html = render("week.html", context::week(season, prov, "../", false))?;
-        write(&weeks_dir.join(format!("week-{}.html", prov.week)), &html)?;
-    }
-
-    let latest = season.weeks.last().expect("weeks is non-empty");
-    let html = render("week.html", context::week(season, latest, "", true))?;
-    write(&output_dir.join("index.html"), &html)?;
-
-    let html = render("season.html", context::season(season))?;
-    write(&output_dir.join("season.html"), &html)?;
     Ok(())
 }
 

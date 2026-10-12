@@ -257,17 +257,34 @@ The templates and static files are embedded in the binary at compile time, so
 
 ### Changing the look
 
-- **Colors and spacing** are tokens at the top of `static/style.css` (light
-  theme, then dark). The charts in `static/app.js` read the same tokens, so a
-  palette change is made in one place. Visitors can switch between light,
-  dark and their device's setting with the button in the header.
-- **Navigation** is the `nav` list at the top of `templates/base.html`: one
-  line per page (key, file, label, whether it's shown). A page highlights its
-  own entry with `{% set active_page = "<key>" %}`.
-- **Shared pieces** (team names with avatars, rank badges, award tiles,
-  movement arrows, percentage bars, jump links, the week pager) are macros in
-  `templates/_macros.html`. Templates import them with
-  `{% import "_macros.html" as ui with context %}`.
-- Every top-level `<section>` in a page renders as a card; wrap two in
-  `<div class="card-row">` to put them side by side on wide screens. Add
-  `class="num"` to a numeric column's `<th>` and `<td>`s to right-align it.
+- **Colors and spacing** are tokens at the top of `static/style.css`: the
+  light theme, then the dark theme written twice (once for "follow the OS",
+  once for the header's theme button). `the_dark_theme_tokens_stay_in_sync`
+  (`tests/build.rs`) fails if the two dark blocks drift apart. The charts in
+  `static/app.js` read the same tokens, so a palette change is made in one
+  place. Team colors come from
+  `TEAM_COLORS_LIGHT` / `TEAM_COLORS_DARK` in `src/compute/mod.rs`.
+- **Pages** are one list in `render_site` (`src/build/mod.rs`): path,
+  template, page context (built in `src/build/context.rs`). The nav at the
+  top of `templates/base.html` shows a page only if this season's build made
+  it, and a page highlights its own nav entry
+  with `{% set active_page = "<key>" %}`. A page that draws charts sets
+  `{% set uses_charts = true %}` (or `uses_data` for the trade calculator) so
+  only it loads Chart.js and `data.js`.
+- **Shared pieces** are macros in `templates/_macros.html`: team cells and
+  badges, rank badges, award and record tiles, section headings with their
+  "How this works" link, position cells, percentage bars, jump links, charts
+  and the week pager. Templates import them with
+  `{% import "_macros.html" as ui with context %}`. A chart is
+  `ui.chart("<canvas id>", "<description for screen readers>")` plus a
+  renderer with the same id in `app.js`.
+- Every top-level `<section>` in a page renders as a card (`class="bare"` for
+  a heading over a grid of tiles); wrap two in `<div class="card-row">` to put
+  them side by side on wide screens. Add `class="num"` to a numeric column's
+  `<th>` and `<td>`s to right-align it. A table of sentences gets
+  `class="table-stack"` and a `data-label` on each cell, and becomes a stack of
+  labelled rows on phones.
+- Templates are rendered by minijinja, which reads Jinja2 syntax but has no
+  Python methods: `src/build/env.rs` adds the two the templates call
+  (`dict.get`, `list.index`) and the `fmt2`, `pct`, `thousands` and `xmlattr`
+  filters.

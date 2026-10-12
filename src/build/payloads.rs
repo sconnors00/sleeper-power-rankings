@@ -41,7 +41,12 @@ pub fn build_data_js(season: &SeasonSummary) -> String {
         .map(|(rid, t)| {
             (
                 key(*rid),
-                json!({"name": t.name, "color": t.color, "avatar": t.avatar_url}),
+                json!({
+                    "name": t.name,
+                    "color": t.color,
+                    "colorDark": t.color_dark,
+                    "avatar": t.avatar_url,
+                }),
             )
         })
         .collect();
@@ -166,6 +171,8 @@ pub fn build_data_js(season: &SeasonSummary) -> String {
     }
     payload.insert("scoringSpread".into(), Value::Array(spread));
 
+    // Every team plays every regular-season week (twice, counting a median game).
+    let games = season.weeks.len() as i64 * if season.league_average_match { 2 } else { 1 };
     let mut luck = Vec::new();
     if let Some(last) = season.weeks.last() {
         let mut rows: Vec<&crate::models::PowerRankRow> = last.power_rankings.iter().collect();
@@ -177,6 +184,7 @@ pub fn build_data_js(season: &SeasonSummary) -> String {
                 "winPct": row.win_pct,
                 "record": row.record,
                 "allplayRecord": row.allplay_record,
+                "games": games,
             }));
         }
     }
@@ -189,13 +197,6 @@ pub fn build_data_js(season: &SeasonSummary) -> String {
         .map(|row| json!({"rosterId": row.roster_id, "pf": row.pf, "pa": row.pa}))
         .collect();
     payload.insert("pfVsPa".into(), Value::Array(pf_vs_pa));
-    let bench: Vec<Value> = season
-        .season_board
-        .pf_leaderboard
-        .iter()
-        .map(|row| json!({"rosterId": row.roster_id, "points": row.bench_points}))
-        .collect();
-    payload.insert("benchPoints".into(), Value::Array(bench));
 
     if let Some(trade) = trade_payload(season) {
         payload.insert("trade".into(), trade);

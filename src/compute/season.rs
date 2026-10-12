@@ -178,7 +178,7 @@ pub fn build_season_board(weeks: &[WeekSummary], teams: &BTreeMap<i64, Team>) ->
 
     SeasonBoard {
         log,
-        crown_counts: crown_counts.into_iter().collect(),
+        crown_counts,
         pf_leaderboard,
         records,
         lineup_leaderboard: build_lineup_leaderboard(weeks),

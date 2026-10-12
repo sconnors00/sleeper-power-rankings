@@ -48,7 +48,9 @@ fn week_label_weeks(season: &SeasonSummary) -> Vec<i64> {
     weeks
 }
 
-pub fn common(season: &SeasonSummary, data_js: &str, opts: &SiteOptions) -> Ctx {
+/// What every page gets. `built` is every page path this season writes; the
+/// nav links a page only if it's there.
+pub fn common(season: &SeasonSummary, data_js: &str, opts: &SiteOptions, built: &[String]) -> Ctx {
     let all_seasons = if opts.all_seasons.is_empty() {
         vec![season.season.clone()]
     } else {
@@ -56,16 +58,12 @@ pub fn common(season: &SeasonSummary, data_js: &str, opts: &SiteOptions) -> Ctx 
     };
     BTreeMap::from([
         ("asset_version", Value::from(asset_version(data_js))),
-        ("site_url", Value::from(opts.site_url)),
         ("chart_js_url", Value::from(super::CHART_JS_URL)),
         ("chart_js_sri", Value::from(super::CHART_JS_SRI)),
         ("league_name", Value::from(season.league_name.as_str())),
         ("season_year", Value::from(season.season.as_str())),
-        ("has_draft", Value::from(season.draft.is_some())),
-        ("has_season", Value::from(!season.weeks.is_empty())),
-        ("has_rivalries", Value::from(!opts.rivalries.is_empty())),
-        ("has_trades", Value::from(has_trades_page(season))),
-        ("has_rosters", Value::from(season.roster_report.is_some())),
+        ("teams", ser(&season.teams)),
+        ("built", ser(&built)),
         ("all_seasons", ser(&all_seasons)),
         ("site_root_prefix", Value::from(opts.site_root_prefix)),
         ("recap_week", Value::from(season.playoff_week_start)),
@@ -143,7 +141,7 @@ fn matchup_pair(wk: &WeekSummary, matchup_id: i64, season: &SeasonSummary) -> Ve
 }
 
 /// One week's page: rankings, awards, results, positions, lineups and moves.
-pub fn week(season: &SeasonSummary, wk: &WeekSummary, asset_prefix: &str, is_index: bool) -> Ctx {
+pub fn week(season: &SeasonSummary, wk: &WeekSummary, is_index: bool) -> Ctx {
     let matchups_by_roster: BTreeMap<i64, &crate::models::Matchup> =
         wk.matchups.iter().map(|m| (m.roster_id, m)).collect();
     let rankings_frozen = wk.power_rankings.is_empty() && !season.weeks.is_empty();
@@ -269,12 +267,7 @@ pub fn week(season: &SeasonSummary, wk: &WeekSummary, asset_prefix: &str, is_ind
                 .partial_cmp(&score(b))
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        for pos in POSITIONS {
-            let ranks: Vec<i64> = wk.position_ranks.iter().map(|row| row.ranks[pos]).collect();
-            let lo = ranks.iter().copied().min().unwrap_or(0);
-            let hi = ranks.iter().copied().max().unwrap_or(0);
-            position_extremes.insert(pos.to_string(), (lo, hi));
-        }
+        position_extremes = rank_extremes(wk.position_ranks.iter().map(|row| &row.ranks));
     }
 
     let teams_for =
@@ -287,9 +280,7 @@ pub fn week(season: &SeasonSummary, wk: &WeekSummary, asset_prefix: &str, is_ind
     };
 
     BTreeMap::from([
-        ("season", ser(season)),
         ("week", ser(wk)),
-        ("teams", ser(&season.teams)),
         ("ranking_rows", ser(&ranking_rows)),
         ("results", ser(&results)),
         ("closest_matchups", ser(&closest)),
@@ -311,7 +302,6 @@ pub fn week(season: &SeasonSummary, wk: &WeekSummary, asset_prefix: &str, is_ind
         ("best_bench", ser(&players_for(&awards.best_bench))),
         ("best_starter", ser(&players_for(&awards.best_starter))),
         ("worst_starter", ser(&players_for(&awards.worst_starter))),
-        ("asset_prefix", Value::from(asset_prefix)),
         ("is_index", Value::from(is_index)),
         ("playoff", Value::from(wk.week >= season.playoff_week_start)),
         (
@@ -320,6 +310,24 @@ pub fn week(season: &SeasonSummary, wk: &WeekSummary, asset_prefix: &str, is_ind
         ),
         ("rankings_frozen", Value::from(rankings_frozen)),
     ])
+}
+
+/// Each position's best and worst rank across these rows' per-position ranks,
+/// so templates can mark the league's best and worst at it.
+fn rank_extremes<'a>(
+    rows: impl Iterator<Item = &'a BTreeMap<String, i64>> + Clone,
+) -> BTreeMap<String, (i64, i64)> {
+    POSITIONS
+        .iter()
+        .map(|pos| {
+            let ranks = rows.clone().map(|ranks| ranks[*pos]);
+            let extremes = match (ranks.clone().min(), ranks.max()) {
+                (Some(lo), Some(hi)) => (lo, hi),
+                _ => (1, 1),
+            };
+            (pos.to_string(), extremes)
+        })
+        .collect()
 }
 
 pub fn preseason_rows(season: &SeasonSummary) -> Vec<PreseasonEntry> {
@@ -333,34 +341,17 @@ pub fn preseason_rows(season: &SeasonSummary) -> Vec<PreseasonEntry> {
         .collect()
 }
 
-pub fn preseason_page(rows: &[PreseasonEntry]) -> Ctx {
-    BTreeMap::from([
-        ("asset_prefix", Value::from("../")),
-        ("preseason_rows", ser(&rows)),
-    ])
-}
-
-pub fn landing(rows: &[PreseasonEntry]) -> Ctx {
-    BTreeMap::from([
-        ("asset_prefix", Value::from("")),
-        ("preseason_rows", ser(&rows)),
-    ])
+/// The landing page and the pre-season week page.
+pub fn preseason(rows: &[PreseasonEntry]) -> Ctx {
+    BTreeMap::from([("preseason_rows", ser(&rows))])
 }
 
 pub fn draft(season: &SeasonSummary) -> Ctx {
-    BTreeMap::from([
-        ("draft", ser(&season.draft)),
-        ("teams", ser(&season.teams)),
-        ("asset_prefix", Value::from("")),
-    ])
+    BTreeMap::from([("draft", ser(&season.draft))])
 }
 
 pub fn recap(season: &SeasonSummary) -> Ctx {
-    BTreeMap::from([
-        ("asset_prefix", Value::from("../")),
-        ("teams", ser(&season.teams)),
-        ("records", ser(&season.season_board.records)),
-    ])
+    BTreeMap::from([("records", ser(&season.season_board.records))])
 }
 
 #[derive(Serialize)]
@@ -380,7 +371,6 @@ pub fn rivalries(managers: &[Manager]) -> Ctx {
         streak: highlights.streak,
     };
     BTreeMap::from([
-        ("asset_prefix", Value::from("")),
         ("managers", ser(&managers)),
         ("by_id", ser(&by_id)),
         ("highlights", ser(&view)),
@@ -464,13 +454,7 @@ pub fn trades(season: &SeasonSummary) -> Ctx {
         });
     }
 
-    let mut ctx: Ctx = BTreeMap::from([
-        ("trade_history", ser(&history)),
-        ("values", ser(&tv)),
-        ("weeks_left", Value::from(0)),
-        ("asset_prefix", Value::from("")),
-        ("teams", ser(&season.teams)),
-    ]);
+    let mut ctx: Ctx = BTreeMap::from([("trade_history", ser(&history)), ("values", ser(&tv))]);
     let Some(tv) = tv else {
         return ctx;
     };
@@ -516,20 +500,6 @@ pub fn trades(season: &SeasonSummary) -> Ctx {
         }
     }
 
-    let mut extremes: BTreeMap<String, (i64, i64)> = BTreeMap::new();
-    for pos in POSITIONS {
-        let ranks: Vec<i64> = tv.strength.iter().map(|row| row.ranks[pos]).collect();
-        let extreme = if ranks.is_empty() {
-            (1, 1)
-        } else {
-            (
-                *ranks.iter().min().unwrap_or(&1),
-                *ranks.iter().max().unwrap_or(&1),
-            )
-        };
-        extremes.insert(pos.to_string(), extreme);
-    }
-
     let mut calc_teams: Vec<Team> = tv
         .rosters
         .iter()
@@ -553,9 +523,11 @@ pub fn trades(season: &SeasonSummary) -> Ctx {
         ("calc_teams", ser(&calc_teams)),
         ("value_board", ser(&board)),
         ("strength_rows", ser(&strength_rows)),
-        ("strength_extremes", ser(&extremes)),
+        (
+            "strength_extremes",
+            ser(&rank_extremes(tv.strength.iter().map(|row| &row.ranks))),
+        ),
         ("positions", ser(&POSITIONS)),
-        ("weeks_left", Value::from(tv.weeks_left)),
         ("trade_deadline", ser(&tv.trade_deadline)),
         ("deadline_passed", Value::from(deadline_passed)),
     ]));
@@ -567,43 +539,22 @@ fn round_sum(values: impl Iterator<Item = f64>) -> f64 {
     crate::util::round2(crate::compute::sum_f64(values))
 }
 
-#[derive(Serialize)]
-struct CrownRow {
-    roster_id: i64,
-    count: i64,
-}
-
-/// The season scoring board, with its crown counts already in display order.
+/// The season scoring board, with the teams in the order the highlight picker
+/// lists them: by name, ignoring case, as Jinja2's `sort` would order them.
 pub fn season(season: &SeasonSummary) -> Ctx {
-    let mut crowns: Vec<CrownRow> = season
-        .season_board
-        .crown_counts
-        .iter()
-        .map(|(roster_id, count)| CrownRow {
-            roster_id: *roster_id,
-            count: *count,
-        })
-        .collect();
-    // Most crowns first; the sort is stable, so ties keep roster order.
-    crowns.sort_by_key(|c| std::cmp::Reverse(c.count));
+    let mut teams_by_name: Vec<&Team> = season.teams.values().collect();
+    teams_by_name.sort_by_key(|t| t.name.to_lowercase());
     BTreeMap::from([
         ("season", ser(season)),
         ("board", ser(&season.season_board)),
-        ("teams", ser(&season.teams)),
-        ("crown_rows", ser(&crowns)),
-        ("asset_prefix", Value::from("")),
+        ("teams_by_name", ser(&teams_by_name)),
     ])
 }
 
-pub fn rosters(season: &SeasonSummary, report: &RosterReport) -> Ctx {
+pub fn rosters(report: &RosterReport) -> Ctx {
     let mut faab_order: Vec<&TeamRoster> = report.teams.iter().collect();
     faab_order.sort_by_key(|t| std::cmp::Reverse(t.faab_remaining));
-    BTreeMap::from([
-        ("report", ser(report)),
-        ("faab_order", ser(&faab_order)),
-        ("teams", ser(&season.teams)),
-        ("asset_prefix", Value::from("")),
-    ])
+    BTreeMap::from([("report", ser(report)), ("faab_order", ser(&faab_order))])
 }
 
 #[derive(Serialize)]
@@ -631,7 +582,6 @@ struct ExampleView {
 #[derive(Serialize)]
 struct TradeExample {
     pv: PlayerValue,
-    team: Option<Team>,
     replacement: f64,
     share: f64,
 }
@@ -681,7 +631,6 @@ fn trade_example(season: &SeasonSummary) -> Option<TradeExample> {
         crate::compute::sum_f64(tv.weights.iter().zip(&pv.availability).map(|(w, a)| w * a));
     Some(TradeExample {
         pv: pv.clone(),
-        team: pv.roster_id.and_then(|rid| season.teams.get(&rid).cloned()),
         replacement: tv.replacement[&pv.player.position],
         share: if weight_sum != 0.0 {
             played / weight_sum
@@ -780,6 +729,5 @@ pub fn how_it_works(season: &SeasonSummary) -> Ctx {
             Value::from(season.roster_positions.iter().any(|s| s == "SUPER_FLEX")),
         ),
         ("replacement_levels", ser(&replacement_levels)),
-        ("asset_prefix", Value::from("")),
     ])
 }

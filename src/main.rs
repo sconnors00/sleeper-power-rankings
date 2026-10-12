@@ -129,7 +129,6 @@ fn build(
 
     let site = PathBuf::from(SITE_DIR);
     let opts_root = SiteOptions {
-        site_url: &settings.site_url,
         all_seasons: &all_seasons,
         site_root_prefix: "",
         rivalries: &rivalries,
@@ -138,7 +137,6 @@ fn build(
     for s in &all {
         let dir = site.join(&s.season);
         let opts = SiteOptions {
-            site_url: &settings.site_url,
             all_seasons: &all_seasons,
             site_root_prefix: "../",
             rivalries: &rivalries,
