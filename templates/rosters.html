@@ -25,7 +25,7 @@
   <table class="data-table">
     <thead><tr><th>Team</th><th>Remaining</th><th class="num">Spent</th><th class="num">Winning bids</th></tr></thead>
     <tbody>
-      {% for t in report.teams | sort(attribute="faab_remaining", reverse=True) %}
+      {% for t in faab_order %}
       <tr>
         {{ ui.team_cell(teams[t.roster_id], href="#team-" ~ t.roster_id) }}
         <td><strong>{{ ui.meter(t.faab_remaining / report.faab_budget, "$" ~ t.faab_remaining) }}</strong></td>

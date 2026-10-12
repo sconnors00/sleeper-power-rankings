@@ -28,21 +28,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-          enable-cache: true
-      # Completed weeks and the ~5 MB players map never change, so carry the
-      # raw-response cache between runs; restore-keys lets a new week reuse
-      # last week's entry and only fetch what's new.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Past seasons' raw responses never change, so carry the cache between
+      # runs (the current season is always refetched, and the ~13 MB players
+      # map at most daily); restore-keys lets each run reuse the last entry.
       - uses: actions/cache@v4
         with:
           path: data
           key: sleeper-data-${{ github.run_id }}
           restore-keys: |
             sleeper-data-
-      - run: uv sync
-      - run: uv run ffpr build --provisional
+      - run: cargo build --release
+      - run: ./target/release/ffpr build --provisional
         env:
           SLEEPER_LEAGUE_ID: ${{ secrets.SLEEPER_LEAGUE_ID }}
       - uses: actions/upload-pages-artifact@v3

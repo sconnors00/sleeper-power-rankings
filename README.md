@@ -1,6 +1,6 @@
 # sleeper-power-rankings (ffpr)
 
-A small Python tool that pulls a Sleeper fantasy football league from the
+A small Rust tool that pulls a Sleeper fantasy football league from the
 [Sleeper API](https://docs.sleeper.com) and builds a static, mobile-first web
 page: power rankings, weekly awards, a season scoring board, and a handful of
 Chart.js charts. No servers, no logins, no frontend framework -- plain
@@ -8,12 +8,12 @@ HTML/CSS/JS, rebuilt from scratch on every run and hosted with GitHub Pages.
 
 ## Setup
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+Requires a stable [Rust toolchain](https://rustup.rs) (1.88 or newer).
 
 ```bash
 git clone https://github.com/sconnors00/sleeper-power-rankings.git
 cd sleeper-power-rankings
-uv sync
+cargo build --release   # produces target/release/ffpr
 ```
 
 ### Finding a Sleeper league ID
@@ -31,20 +31,25 @@ that order of precedence: `--league` > env var > `config.toml`).
 ## Usage
 
 ```bash
-uv run ffpr build              # build site/ through the latest completed week
-uv run ffpr build --through 8  # build only through week 8
-uv run ffpr build --provisional  # also include the in-progress week (excluded from rankings)
-uv run ffpr serve              # preview at http://localhost:8000
-uv run ffpr blurb              # print a chat-ready recap of the latest week
+ffpr build              # build site/ through the latest completed week
+ffpr build --through 8  # build only through week 8
+ffpr build --provisional  # also include the in-progress week (excluded from rankings)
+ffpr serve              # preview at http://localhost:8000
+ffpr blurb              # print a chat-ready recap of the latest week
+
+# ffpr is target/release/ffpr; or run it straight from the source tree:
+cargo run --release -- build
 ```
 
-Every command accepts `--league <id>` and `--season <year>` overrides.
+`build` and `blurb` accept `--league <id>` and `--season <year>` overrides.
 
-Raw Sleeper API responses are cached under `data/<season>/raw/` (gitignored)
-so completed weeks are never refetched and builds work offline once cached;
-the in-progress week and league/roster/user data are always refetched. The
-`data/players_nfl.json` cache (the ~5 MB player map) refreshes at most once a
-day, per Sleeper's guidance.
+Raw Sleeper API responses are cached under `data/<season>/raw/` (gitignored).
+Past seasons are served from that cache and never refetched; the current
+season's weeks and league/roster/user data are refetched on every build
+(stat corrections and waivers keep changing a week after its games), falling
+back to the cache when the network is unavailable, so builds work offline
+once cached. The `data/players_nfl.json` cache (the ~13 MB player map)
+refreshes at most once a day, per Sleeper's guidance.
 
 ## Tuning the power rankings
 
@@ -176,8 +181,8 @@ to the repo -- every run rebuilds `site/` from scratch from the Sleeper API.
 
 ## GitHub setup (one-time, manual)
 
-This repo ships `.github/workflows/build.yml`, which installs `uv`, runs
-`ffpr build`, and publishes `site/` to GitHub Pages. You need to configure
+This repo ships `.github/workflows/build.yml`, which builds the release binary,
+runs `ffpr build`, and publishes `site/` to GitHub Pages. You need to configure
 two things in the GitHub UI:
 
 1. **Repo secret** -- **Settings > Secrets and variables > Actions > New
@@ -195,9 +200,10 @@ at `https://sconnors00.github.io/sleeper-power-rankings/` (already set as
 `site_url` in `config.toml`).
 
 Note: GitHub Actions' `schedule` cron is UTC-only (no timezone support), so
-the workflow is pinned to `11:00 UTC` Tuesdays, which is 7:00am during EDT
-and drifts to 6:00am during EST (the US DST boundary). Adjust the cron in
-`.github/workflows/build.yml` if you want it exact year-round.
+the workflow is pinned to `11:41 UTC` Tuesdays (with a `15:41 UTC` backstop
+run), which is 7:41am during EDT and drifts to 6:41am during EST (the US DST
+boundary). Adjust the cron in `.github/workflows/build.yml` if you want it
+exact year-round.
 
 Because `site/` is fully self-contained (relative asset paths, no absolute
 domain references), the same output can also be rsynced to nginx on the
@@ -207,26 +213,61 @@ entirely.
 ## Development
 
 ```bash
-uv run pytest        # unit tests + a build smoke test, against committed fixtures
-uv run ruff check .  # lint
-uv run ruff format . # format
+cargo test                            # unit, compute, cache, render and CLI tests
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all                       # format (CI checks with --check)
 ```
 
 `tests/fixtures/` holds real (trimmed) Sleeper API responses from one week of
-a past season so `compute.py` and `build.py` can be tested without hitting
-the network.
+a past season so the computations and pages can be tested without hitting the
+network. The CLI tests run the real binary against a local stand-in for the
+Sleeper API that serves those fixtures. `tests/fixtures/tls/` is a throwaway test CA and
+127.0.0.1 certificate (private key included, trusted nowhere else) for the
+HTTPS test.
+
+`SLEEPER_API_BASE` and `SLEEPER_SCHEDULE_BASE` override the API root and the NFL
+schedule root, which is how those tests (and any offline mirror) point the
+build somewhere else.
+
+Requests honour the usual `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and
+`NO_PROXY` environment variables, as the Python version (httpx) did. Behind a
+proxy that re-signs TLS, point `SSL_CERT_FILE` (a PEM bundle) or `SSL_CERT_DIR`
+at its CA certificate; it is trusted alongside the bundled roots.
+
+### Layout
+
+```
+src/
+  main.rs       # the ffpr command line (build, serve, blurb)
+  pipeline.rs   # fetches and assembles a season, best-effort where it can be
+  sleeper.rs    # read-only API client with the raw-response cache under data/
+  raw.rs        # typed views of the Sleeper responses
+  models.rs     # the computed season: teams, weeks, board, trades, rosters
+  compute/      # pure functions: awards, rankings, playoffs, trades, drafts
+  build/        # renders site/: page contexts, data.js, rosters.json, templates
+  pyrand.rs     # Python's random module, so simulated odds match exactly
+  pyjson.rs     # Python's json.dumps formatting, so data.js matches byte for byte
+templates/      # Jinja2-syntax pages, rendered by minijinja (compiled in)
+static/         # style.css and app.js (compiled in, copied into site/)
+tests/          # integration tests and fixtures
+```
+
+The templates and static files are embedded in the binary at compile time, so
+`site/` is self-contained and the binary runs from any directory.
 
 ### Changing the look
 
 - **Colors and spacing** are tokens at the top of `static/style.css`: the
   light theme, then the dark theme written twice (once for "follow the OS",
-  once for the header's theme button). `test_dark_tokens_in_sync` fails if the
-  two dark blocks drift apart. The charts in `static/app.js` read the same
-  tokens, so a palette change is made in one place. Team colors come from
-  `TEAM_COLORS_LIGHT` / `TEAM_COLORS_DARK` in `ffpr/compute.py`.
-- **Pages** are one list in `render_site` (`ffpr/build.py`): path, template,
-  page context. The nav at the top of `templates/base.html` shows a page only
-  if this season's build made it, and a page highlights its own nav entry
+  once for the header's theme button). `the_dark_theme_tokens_stay_in_sync`
+  (`tests/build.rs`) fails if the two dark blocks drift apart. The charts in
+  `static/app.js` read the same tokens, so a palette change is made in one
+  place. Team colors come from
+  `TEAM_COLORS_LIGHT` / `TEAM_COLORS_DARK` in `src/compute/mod.rs`.
+- **Pages** are one list in `render_site` (`src/build/mod.rs`): path,
+  template, page context (built in `src/build/context.rs`). The nav at the
+  top of `templates/base.html` shows a page only if this season's build made
+  it, and a page highlights its own nav entry
   with `{% set active_page = "<key>" %}`. A page that draws charts sets
   `{% set uses_charts = true %}` (or `uses_data` for the trade calculator) so
   only it loads Chart.js and `data.js`.
@@ -243,3 +284,7 @@ the network.
   `<th>` and `<td>`s to right-align it. A table of sentences gets
   `class="table-stack"` and a `data-label` on each cell, and becomes a stack of
   labelled rows on phones.
+- Templates are rendered by minijinja, which reads Jinja2 syntax but has no
+  Python methods: `src/build/env.rs` adds the two the templates call
+  (`dict.get`, `list.index`) and the `fmt2`, `pct`, `thousands` and `xmlattr`
+  filters.

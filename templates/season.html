@@ -24,7 +24,7 @@
 {% if season.playoff_odds %}
 <section id="playoff-odds">
   {{ ui.section_head("Playoff odds", how="playoff-odds") }}
-  <p class="note">From {{ "{:,}".format(season.playoff_odds_sims) }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}. Dashed lines mark the {% if season.playoff_byes %}bye and {% endif %}playoff cut.</p>
+  <p class="note">From {{ season.playoff_odds_sims | thousands }} simulations of the remaining {{ season.remaining_weeks }} regular-season week{{ "s" if season.remaining_weeks != 1 }}. The top {{ season.playoff_teams }} make the playoffs{% if season.playoff_byes %} and the top {{ season.playoff_byes }} get first-round byes{% endif %}. Dashed lines mark the {% if season.playoff_byes %}bye and {% endif %}playoff cut.</p>
   <div class="table-scroll">
   <table class="data-table">
     <thead><tr><th>Team</th><th>Playoffs</th>{% if season.playoff_byes %}<th class="num">Bye</th>{% endif %}<th class="num">#1 seed</th><th class="num">Record</th><th class="num">Proj. wins</th></tr></thead>
@@ -100,7 +100,7 @@
   <h2>Weekly points by team</h2>
   <label class="chart-pick" hidden>Highlight
     <select id="highlight-team">
-      {% for t in teams.values() | sort(attribute="name") %}
+      {% for t in teams_by_name %}
       <option value="{{ t.roster_id }}">{{ t.name }}</option>
       {% endfor %}
     </select>
