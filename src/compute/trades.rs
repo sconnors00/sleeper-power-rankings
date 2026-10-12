@@ -159,7 +159,8 @@ pub fn rank_prior(samples: &[(Option<i64>, f64, i64)]) -> RankPrior {
     let sxx = sum_f64(
         ranked
             .iter()
-            .map(|(x, _, g)| g * (x - mean_x) * (x - mean_x)),
+            // Python writes g * (x - mean_x) ** 2: square first, then weight.
+            .map(|(x, _, g)| g * ((x - mean_x) * (x - mean_x))),
     );
     let sxy = sum_f64(
         ranked

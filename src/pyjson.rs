@@ -80,8 +80,48 @@ fn number(n: &serde_json::Number) -> String {
     } else if f.is_infinite() {
         if f > 0.0 { "Infinity" } else { "-Infinity" }.to_string()
     } else {
-        // serde_json prints the shortest round-trip form, as Python's repr does.
-        serde_json::to_string(&f).unwrap_or_default()
+        float_repr(f)
+    }
+}
+
+/// Python's `repr(float)`: the shortest digits that round-trip, written as a
+/// plain decimal when the exponent is in [-4, 16) and as `d.ddde±XX` (at least
+/// two exponent digits) otherwise.
+fn float_repr(f: f64) -> String {
+    if f == 0.0 {
+        return if f.is_sign_negative() { "-0.0" } else { "0.0" }.to_string();
+    }
+    // `{:e}` gives the same shortest round-trip digits Python uses.
+    let scientific = format!("{f:e}");
+    let (mantissa, exponent) = scientific.split_once('e').expect("exponent form");
+    let exponent: i32 = exponent.parse().expect("integer exponent");
+    let sign = if mantissa.starts_with('-') { "-" } else { "" };
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    if (-4..16).contains(&exponent) {
+        let point = exponent + 1; // digits before the decimal point
+        if point <= 0 {
+            format!(
+                "{sign}0.{}{digits}",
+                "0".repeat(point.unsigned_abs() as usize)
+            )
+        } else if point as usize >= digits.len() {
+            format!(
+                "{sign}{digits}{}.0",
+                "0".repeat(point as usize - digits.len())
+            )
+        } else {
+            let (whole, fraction) = digits.split_at(point as usize);
+            format!("{sign}{whole}.{fraction}")
+        }
+    } else {
+        let (first, rest) = digits.split_at(1);
+        let mantissa = if rest.is_empty() {
+            first.to_string()
+        } else {
+            format!("{first}.{rest}")
+        };
+        let exp_sign = if exponent < 0 { '-' } else { '+' };
+        format!("{sign}{mantissa}e{exp_sign}{:02}", exponent.unsigned_abs())
     }
 }
 
@@ -106,4 +146,50 @@ fn write_string(s: &str, out: &mut String) {
         }
     }
     out.push('"');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn floats_print_exactly_as_python_repr() {
+        let cases = [
+            (5e-6, "5e-06"),
+            (-3.5e-7, "-3.5e-07"),
+            (0.00009999, "9.999e-05"),
+            (2.5e-5, "2.5e-05"),
+            (1e16, "1e+16"),
+            (1.5e16, "1.5e+16"),
+            (1.4210854715202004e-14, "1.4210854715202004e-14"),
+            (0.0001, "0.0001"),
+            (0.0003, "0.0003"),
+            (0.03125, "0.03125"),
+            (1e-14, "1e-14"),
+            (28.0, "28.0"),
+            (0.0, "0.0"),
+            (-0.0, "-0.0"),
+            (1234567890123456.0, "1234567890123456.0"),
+            (1e22, "1e+22"),
+            (123.456, "123.456"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1e-5, "1e-05"),
+        ];
+        for (value, python) in cases {
+            assert_eq!(float_repr(value), python, "repr({value:e})");
+        }
+    }
+
+    #[test]
+    fn dumps_matches_python_separators_and_escapes() {
+        let value = serde_json::json!({"a": [1, 2.5, "\u{e9}"], "b": {}});
+        assert_eq!(
+            dumps(&value, None),
+            "{\"a\": [1, 2.5, \"\\u00e9\"], \"b\": {}}"
+        );
+        assert_eq!(
+            dumps(&value, Some(2)),
+            "{\n  \"a\": [\n    1,\n    2.5,\n    \"\\u00e9\"\n  ],\n  \"b\": {}\n}"
+        );
+    }
 }

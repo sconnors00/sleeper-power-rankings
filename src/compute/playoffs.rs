@@ -10,7 +10,7 @@ use super::{format_record, NFL_LAST_WEEK};
 use crate::models::{PlayoffOddsRow, WeekSummary};
 use crate::pyrand::PyRandom;
 use crate::raw::RawMatchup;
-use crate::util::{fmean, median, pvariance};
+use crate::util::{fmean, median, pow_half, pvariance};
 
 /// (roster, roster) pairings for a scheduled week; unpaired entries skipped.
 pub fn schedule_pairs(raw: &[RawMatchup]) -> Vec<(i64, i64)> {
@@ -139,14 +139,12 @@ pub fn simulate_playoff_odds(
     let dof = all_scores.len() as i64 - history.len() as i64;
     let noise_var = if dof > 0 {
         let means = &team_means;
-        let ss: f64 = history
-            .iter()
-            .flat_map(|(rid, scores)| {
-                scores
-                    .iter()
-                    .map(move |s| (s - means[rid]) * (s - means[rid]))
-            })
-            .fold(0.0, |acc, v| acc + v);
+        let ss = history.iter().flat_map(|(rid, scores)| {
+            scores
+                .iter()
+                .map(move |s| (s - means[rid]) * (s - means[rid]))
+        });
+        let ss = crate::compute::sum_f64(ss);
         ss / dof as f64
     } else {
         pvariance(&all_scores) // one week in: nothing yet separates luck from strength
@@ -166,9 +164,9 @@ pub fn simulate_playoff_odds(
             0.0
         };
         let estimate = league_mean + weight * (team_means[rid] - league_mean);
-        strength.insert(*rid, (estimate, (weight * sampling_var).sqrt()));
+        strength.insert(*rid, (estimate, pow_half(weight * sampling_var)));
     }
-    let noise_sd = noise_var.sqrt();
+    let noise_sd = pow_half(noise_var);
 
     let rosters: Vec<i64> = {
         let mut keys: Vec<i64> = history.keys().copied().collect();

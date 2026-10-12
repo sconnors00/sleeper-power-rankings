@@ -669,19 +669,16 @@ fn trade_example(season: &SeasonSummary) -> Option<TradeExample> {
         .values()
         .filter(|pv| pv.roster_id.is_some() && pv.games > 0 && pv.value > 0.0)
         .collect();
-    let pv = candidates.into_iter().max_by(|a, b| {
+    let pv = crate::util::first_max_by(candidates, |a, b| {
         a.value
             .partial_cmp(&b.value)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.player.name.cmp(&b.player.name))
     })?;
-    let weight_sum: f64 = tv.weights.iter().sum();
-    let played: f64 = tv
-        .weights
-        .iter()
-        .zip(&pv.availability)
-        .map(|(w, a)| w * a)
-        .sum();
+    // Python's sum() is compensated; plain sums can tip the percentage shown.
+    let weight_sum = crate::compute::sum_f64(tv.weights.iter().copied());
+    let played =
+        crate::compute::sum_f64(tv.weights.iter().zip(&pv.availability).map(|(w, a)| w * a));
     Some(TradeExample {
         pv: pv.clone(),
         team: pv.roster_id.and_then(|rid| season.teams.get(&rid).cloned()),

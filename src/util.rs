@@ -45,8 +45,9 @@ pub fn py_min(values: impl IntoIterator<Item = f64>) -> Option<f64> {
     Some(values.fold(first, |best, v| if v < best { v } else { best }))
 }
 
-/// Exactly rounded sum, in the spirit of `math.fsum`: partials are kept so no
-/// precision is lost to intermediate rounding, then combined top-down.
+/// `math.fsum`: the correctly rounded sum, ported from CPython's
+/// `math_fsum` (Shewchuk's partials, then a half-even correction across the
+/// top partials so the result is the nearest double to the exact sum).
 pub fn fsum(values: impl IntoIterator<Item = f64>) -> f64 {
     let mut partials: Vec<f64> = Vec::new();
     for mut x in values {
@@ -65,9 +66,58 @@ pub fn fsum(values: impl IntoIterator<Item = f64>) -> f64 {
             x = hi;
         }
         partials.truncate(i);
-        partials.push(x);
+        if x != 0.0 {
+            partials.push(x);
+        }
     }
-    partials.iter().rev().fold(0.0, |acc, p| acc + p)
+
+    let mut n = partials.len();
+    if n == 0 {
+        return 0.0;
+    }
+    n -= 1;
+    let mut hi = partials[n];
+    let mut lo = 0.0;
+    // Add the partials from the top until the sum stops being exact.
+    while n > 0 {
+        let x = hi;
+        n -= 1;
+        let y = partials[n];
+        hi = x + y;
+        lo = y - (hi - x);
+        if lo != 0.0 {
+            break;
+        }
+    }
+    // Round half-even across partials: a remainder of exactly half an ulp
+    // pushed further by the next partial rounds away.
+    if n > 0 && ((lo < 0.0 && partials[n - 1] < 0.0) || (lo > 0.0 && partials[n - 1] > 0.0)) {
+        let y = lo * 2.0;
+        let x = hi + y;
+        if y == x - hi {
+            hi = x;
+        }
+    }
+    hi
+}
+
+/// Python's `x ** 0.5`. CPython calls libm `pow`, which can differ from
+/// `sqrt` in the last bit; `black_box` keeps the compiler from turning this
+/// into a `sqrt`.
+pub fn pow_half(x: f64) -> f64 {
+    x.powf(std::hint::black_box(0.5))
+}
+
+/// Python's `max(items, key=...)`: the first item whose key is largest.
+/// (`Iterator::max_by` returns the last one on a tie.)
+pub fn first_max_by<T>(
+    items: impl IntoIterator<Item = T>,
+    cmp: impl Fn(&T, &T) -> std::cmp::Ordering,
+) -> Option<T> {
+    items.into_iter().fold(None, |best, item| match best {
+        Some(b) if cmp(&item, &b) != std::cmp::Ordering::Greater => Some(b),
+        _ => Some(item),
+    })
 }
 
 /// `statistics.fmean`.
@@ -119,5 +169,26 @@ mod tests {
     #[test]
     fn fsum_is_exact_where_naive_sum_is_not() {
         assert_eq!(fsum([1e16, 1.0, -1e16]), 1.0);
+    }
+
+    #[test]
+    fn fsum_matches_cpython_math_fsum() {
+        // Values printed by CPython 3.12's math.fsum.
+        assert_eq!(fsum([59.07, 155.64, 103.89]), 318.59999999999997);
+        assert_eq!(fsum([1e-16, 1.0, 1e16]), 1.0000000000000002e16);
+        assert_eq!(fsum([0.1; 10]), 1.0);
+        assert_eq!(fsum(std::iter::empty()), 0.0);
+    }
+
+    #[test]
+    fn pow_half_matches_python_rather_than_sqrt() {
+        assert_eq!(pow_half(617.298836), 24.84549931074037); // sqrt gives ...365
+    }
+
+    #[test]
+    fn first_max_by_keeps_the_first_of_equal_maxima() {
+        let items = [(1, "a"), (3, "b"), (3, "c"), (2, "d")];
+        let best = first_max_by(items.iter(), |a, b| a.0.cmp(&b.0)).unwrap();
+        assert_eq!(best.1, "b");
     }
 }

@@ -138,7 +138,7 @@ pub fn grade_draft(picks: &[RawPick], players: &PlayerMap, budget: i64) -> Draft
     } else {
         crate::compute::sum_f64(surpluses.iter().map(|s| (s - mean) * (s - mean))) / count
     };
-    let std = variance.sqrt();
+    let std = crate::util::pow_half(variance);
     for t in &mut team_rows {
         let z = if std > 0.0 {
             (t.surplus - mean) / std

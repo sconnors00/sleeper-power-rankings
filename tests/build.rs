@@ -183,3 +183,58 @@ fn rosters_json_is_pretty_printed_with_a_trailing_newline() {
     let parsed: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed["teams"].as_array().unwrap().len(), 12);
 }
+
+#[test]
+fn the_trade_worked_example_rounds_its_share_like_python() {
+    // Four regular-season weeks and four playoff weeks weighted 1/3, with one
+    // bye: Python's compensated sums give exactly 81.25%, shown as "81.2%".
+    // Plain left-to-right sums land a hair above and print "81.3%".
+    use ffpr::models::{PlayerScore, PlayerValue, TradeValues};
+    use std::collections::BTreeMap;
+
+    let data = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let mut season = fixture_season(data.path());
+    let third = 1.0 / 3.0;
+    let player = PlayerValue {
+        player: PlayerScore {
+            player_id: "p1".into(),
+            name: "Example Receiver".into(),
+            position: "WR".into(),
+            nfl_team: Some("KC".into()),
+            points: 20.0,
+        },
+        roster_id: Some(1),
+        games: 4,
+        ppg: 21.0,
+        prior: 18.0,
+        value: 11.85,
+        injury: None,
+        active: true,
+        surplus: 14.58,
+        availability: vec![1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        projection: 20.0,
+        weeks_available: 7.0,
+    };
+    season.trade_values = Some(TradeValues {
+        players: BTreeMap::from([("p1".to_string(), player)]),
+        replacement: BTreeMap::from([("WR".to_string(), 5.42)]),
+        rosters: vec![(1, vec!["p1".to_string()])],
+        strength: vec![],
+        prior_games: 5,
+        weeks_left: 4,
+        roster_limit: 17,
+        trade_deadline: None,
+        horizon: vec![11, 12, 13, 14, 15, 16, 17, 18],
+        weights: vec![1.0, 1.0, 1.0, 1.0, third, third, third, third],
+        playoff_from: Some(15),
+    });
+    render(&season, out.path());
+
+    let page = read(&out.path().join("how-it-works.html"));
+    assert!(
+        page.contains("7 of 8, or 81.2% once playoff weeks are weighted"),
+        "{page:.0}"
+    );
+    assert!(!page.contains("81.3%"));
+}
