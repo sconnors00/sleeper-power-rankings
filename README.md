@@ -224,6 +224,9 @@ Sleeper API that serves those fixtures.
 schedule root, which is how those tests (and any offline mirror) point the
 build somewhere else.
 
+Requests honour the usual `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and
+`NO_PROXY` environment variables, as the Python version (httpx) did.
+
 ### Layout
 
 ```

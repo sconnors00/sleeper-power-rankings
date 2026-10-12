@@ -1,12 +1,13 @@
 //! `ffpr` command line: build, serve, blurb.
 
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use ffpr::build::{render_site, SiteOptions};
-use ffpr::config::{resolve_league_id, Config, CONFIG_PATH};
+use ffpr::config::{resolve_league_id, Config, UsageError, CONFIG_PATH};
 use ffpr::pipeline;
 use ffpr::serve;
 use ffpr::sleeper::SleeperClient;
@@ -29,8 +30,11 @@ enum Command {
         #[arg(long)]
         through: Option<i64>,
         /// Also include the in-progress week, excluded from rankings.
-        #[arg(long)]
+        #[arg(long, overrides_with = "no_provisional")]
         provisional: bool,
+        /// Leave the in-progress week out (the default).
+        #[arg(long = "no-provisional", overrides_with = "provisional", hide = true)]
+        no_provisional: bool,
         /// Sleeper league id override.
         #[arg(long)]
         league: Option<String>,
@@ -58,19 +62,37 @@ enum Command {
     },
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
+fn main() -> ExitCode {
+    match run(Cli::parse()) {
+        Ok(()) => ExitCode::SUCCESS,
+        // A bad invocation exits 2, like other command-line usage errors.
+        Err(err) if err.is::<UsageError>() => {
+            eprintln!("Error: {err}");
+            ExitCode::from(2)
+        }
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Build {
             through,
             provisional,
+            no_provisional: _,
             league,
             season,
         } => build(through, provisional, league.as_deref(), season.as_deref()),
         Command::Serve { port } => {
             let site = Path::new(SITE_DIR);
             if !site.exists() {
-                bail!("site/ doesn't exist yet -- run `ffpr build` first.");
+                return Err(UsageError(
+                    "site/ doesn't exist yet -- run `ffpr build` first.".into(),
+                )
+                .into());
             }
             println!("Serving site/ at http://localhost:{port}/ (Ctrl+C to stop)");
             serve::serve(site, port)

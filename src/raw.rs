@@ -17,6 +17,34 @@ where
     Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
+/// An integer that may arrive as a float or a numeric string; anything else
+/// (including null) reads as `None`. Python's `dict.get()` never rejects such
+/// values, so one odd field mustn't fail a whole response here either.
+fn lenient_int<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+    Ok(int_from(&Value::deserialize(d)?))
+}
+
+fn int_from(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(n) => n
+            .as_i64()
+            .or_else(|| n.as_f64().filter(|f| f.is_finite()).map(|f| f as i64)),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+/// `{player_id: roster_id}` maps (transaction adds and drops), with entries
+/// whose roster id isn't a number left out rather than failing the response.
+fn lenient_roster_map<'de, D: Deserializer<'de>>(d: D) -> Result<IndexMap<String, i64>, D::Error> {
+    let raw: Option<IndexMap<String, Value>> = Option::deserialize(d)?;
+    Ok(raw
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(player, roster)| int_from(&roster).map(|rid| (player, rid)))
+        .collect())
+}
+
 /// A JSON number (or numeric string, Sleeper sends auction amounts as strings)
 /// as an integer, truncating like Python's `int()`. Missing or null is 0.
 pub fn int_of(value: Option<&Value>) -> i64 {
@@ -166,9 +194,9 @@ pub struct RawTransaction {
     pub status: Option<String>,
     #[serde(default, rename = "type")]
     pub kind: Option<String>,
-    #[serde(default, deserialize_with = "nullable")]
+    #[serde(default, deserialize_with = "lenient_roster_map")]
     pub adds: IndexMap<String, i64>,
-    #[serde(default, deserialize_with = "nullable")]
+    #[serde(default, deserialize_with = "lenient_roster_map")]
     pub drops: IndexMap<String, i64>,
     #[serde(default, deserialize_with = "nullable")]
     pub roster_ids: Vec<i64>,
@@ -185,6 +213,7 @@ pub struct RawTransaction {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct TransactionSettings {
+    #[serde(deserialize_with = "lenient_int")]
     pub waiver_bid: Option<i64>,
 }
 
@@ -192,9 +221,9 @@ pub struct TransactionSettings {
 pub struct RawTradedPick {
     #[serde(default)]
     pub season: Value,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_int")]
     pub round: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_int")]
     pub owner_id: Option<i64>,
 }
 

@@ -152,7 +152,11 @@ fn side(sides: &mut IndexMap<i64, SideDraft>, rid: i64) -> &mut SideDraft {
     })
 }
 
-/// A pick's season as Sleeper sends it (usually a string like "2027").
+/// A pick's season as Sleeper sends it (usually a string like "2027"). A
+/// missing season reads "None", as Python's f-string writes it.
 fn season_text(season: &serde_json::Value) -> String {
-    crate::raw::text_of(season)
+    match season {
+        serde_json::Value::Null => "None".to_string(),
+        other => crate::raw::text_of(other),
+    }
 }

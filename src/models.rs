@@ -336,8 +336,9 @@ impl HeadToHead {
         } else {
             base
         };
-        let points_for = meetings.iter().map(|m| m.points_for).sum();
-        let points_against = meetings.iter().map(|m| m.points_against).sum();
+        // Python's sum() is compensated; a plain fold can land a cent off.
+        let points_for = crate::compute::sum_f64(meetings.iter().map(|m| m.points_for));
+        let points_against = crate::compute::sum_f64(meetings.iter().map(|m| m.points_against));
         let last = meetings
             .last()
             .map(|m| m.result.clone())

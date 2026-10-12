@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::compute::DEFAULT_FORM_WINDOW;
 use crate::models::Weights;
@@ -14,11 +14,40 @@ pub const CONFIG_PATH: &str = "config.toml";
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    /// A string, or a bare integer (TOML allows either for a numeric id).
+    #[serde(deserialize_with = "string_or_integer")]
     pub league_id: Option<String>,
     pub site_url: Option<String>,
     pub weights: PartialWeights,
     pub form: FormConfig,
 }
+
+fn string_or_integer<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Id {
+        Text(String),
+        Number(i64),
+    }
+    Ok(Option::<Id>::deserialize(d)?.map(|id| match id {
+        Id::Text(text) => text,
+        Id::Number(n) => n.to_string(),
+    }))
+}
+
+/// A mistake in how ffpr was invoked (a missing league id, a season that
+/// doesn't match the league, `serve` with nothing built). The command line
+/// exits with status 2 for these, as Click does for bad parameters.
+#[derive(Debug)]
+pub struct UsageError(pub String);
+
+impl std::fmt::Display for UsageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UsageError {}
 
 /// Weights as written in the file. A missing key keeps its default.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -74,13 +103,17 @@ pub fn resolve_league_id(league_override: Option<&str>, config: &Config) -> Resu
     let from_env = std::env::var("SLEEPER_LEAGUE_ID")
         .ok()
         .filter(|s| !s.is_empty());
+    // An empty value counts as unset at every level, like Python's `or`.
     league_override
+        .filter(|s| !s.is_empty())
         .map(str::to_string)
         .or(from_env)
         .or_else(|| config.league_id.clone().filter(|s| !s.is_empty()))
         .ok_or_else(|| {
-            anyhow::anyhow!(
+            UsageError(
                 "No league id. Pass --league, set SLEEPER_LEAGUE_ID, or set league_id in config.toml."
+                    .to_string(),
             )
+            .into()
         })
 }

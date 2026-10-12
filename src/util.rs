@@ -29,6 +29,22 @@ pub fn median(values: &[f64]) -> f64 {
     }
 }
 
+/// Python's `max()` over floats: the first of the largest values. Only a
+/// strictly larger value replaces it, so a tie between `0.0` and `-0.0` keeps
+/// whichever came first, where `f64::max` may pick either.
+pub fn py_max(values: impl IntoIterator<Item = f64>) -> Option<f64> {
+    let mut values = values.into_iter();
+    let first = values.next()?;
+    Some(values.fold(first, |best, v| if v > best { v } else { best }))
+}
+
+/// Python's `min()` over floats: the first of the smallest values.
+pub fn py_min(values: impl IntoIterator<Item = f64>) -> Option<f64> {
+    let mut values = values.into_iter();
+    let first = values.next()?;
+    Some(values.fold(first, |best, v| if v < best { v } else { best }))
+}
+
 /// Exactly rounded sum, in the spirit of `math.fsum`: partials are kept so no
 /// precision is lost to intermediate rounding, then combined top-down.
 pub fn fsum(values: impl IntoIterator<Item = f64>) -> f64 {
@@ -89,6 +105,15 @@ mod tests {
     fn median_averages_even_counts() {
         assert_eq!(median(&[3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(&[4.0, 1.0, 2.0, 3.0]), 2.5);
+    }
+
+    #[test]
+    fn extremes_keep_the_first_of_equal_values_like_python() {
+        assert!(py_max([0.0, -0.0]).unwrap().is_sign_positive());
+        assert!(py_max([-0.0, 0.0]).unwrap().is_sign_negative());
+        assert!(py_min([0.0, -0.0]).unwrap().is_sign_positive());
+        assert_eq!(py_max([1.0, 3.0, 2.0]), Some(3.0));
+        assert_eq!(py_min(std::iter::empty()), None);
     }
 
     #[test]

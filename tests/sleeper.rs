@@ -6,7 +6,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::fs;
 
-use ffpr::sleeper::{week_has_scores, SleeperClient};
+use ffpr::sleeper::{week_has_scores, ProxySettings, SleeperClient};
 use serde_json::{json, Value};
 
 use common::{serve_routes, LEAGUE_2025};
@@ -34,7 +34,12 @@ fn week_has_scores_tells_played_from_scheduled() {
 fn a_completed_week_is_fetched_once_then_served_from_cache() {
     let api = serve_routes(BTreeMap::from([(matchups_path(3), scored())]));
     let dir = tempfile::tempdir().expect("temp dir");
-    let client = SleeperClient::with_base_urls(dir.path(), &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
 
     let first = client
         .get_matchups(LEAGUE_2025, "2025", 3, true)
@@ -51,7 +56,12 @@ fn a_completed_week_is_fetched_once_then_served_from_cache() {
 fn an_unplayed_week_is_returned_but_never_cached() {
     let api = serve_routes(BTreeMap::from([(matchups_path(7), unplayed())]));
     let dir = tempfile::tempdir().expect("temp dir");
-    let client = SleeperClient::with_base_urls(dir.path(), &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
 
     assert_eq!(
         client.get_matchups(LEAGUE_2025, "2025", 7, false).unwrap(),
@@ -72,7 +82,12 @@ fn a_zero_placeholder_in_the_cache_is_refetched_for_a_completed_week() {
     let raw = dir.path().join("2025/raw");
     fs::create_dir_all(&raw).unwrap();
     fs::write(raw.join("matchups_week4.json"), unplayed().to_string()).unwrap();
-    let client = SleeperClient::with_base_urls(dir.path(), &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
 
     assert_eq!(
         client.get_matchups(LEAGUE_2025, "2025", 4, true).unwrap(),
@@ -96,7 +111,12 @@ fn the_in_progress_week_refreshes_a_stale_cache() {
         json!([{"roster_id": 9, "points": 1.0}]).to_string(),
     )
     .unwrap();
-    let client = SleeperClient::with_base_urls(dir.path(), &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
 
     assert_eq!(
         client.get_matchups(LEAGUE_2025, "2025", 6, false).unwrap(),
@@ -115,8 +135,12 @@ fn a_failed_fetch_falls_back_to_the_cached_copy() {
     )
     .unwrap();
     // Nothing listens on port 9, so the request fails.
-    let client =
-        SleeperClient::with_base_urls(dir.path(), "http://127.0.0.1:9/v1", "http://127.0.0.1:9");
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        "http://127.0.0.1:9/v1",
+        "http://127.0.0.1:9",
+        ProxySettings::default(),
+    );
     let league = client.get_league(LEAGUE_2025).expect("served from cache");
     assert_eq!(league["name"], "cached");
 }
@@ -127,7 +151,12 @@ fn the_nfl_schedule_is_fetched_once() {
     let url = "/schedule/nfl/regular/2025".to_string();
     let api = serve_routes(BTreeMap::from([(url.clone(), schedule.clone())]));
     let dir = tempfile::tempdir().expect("temp dir");
-    let client = SleeperClient::with_base_urls(dir.path(), &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
 
     assert_eq!(client.get_nfl_schedule("2025").unwrap(), schedule);
     assert_eq!(client.get_nfl_schedule("2025").unwrap(), schedule);
@@ -142,9 +171,40 @@ fn a_players_map_over_ten_megabytes_is_read_whole() {
     let players = json!({"4046": {"full_name": "Patrick Mahomes", "notes": padding}});
     let api = serve_routes(BTreeMap::from([("/v1/players/nfl".to_string(), players)]));
     let dir = tempfile::tempdir().expect("temp dir");
-    let client = SleeperClient::with_base_urls(dir.path(), &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
 
     let fetched = client.get_players().expect("large response is read");
     assert_eq!(fetched["4046"]["full_name"], "Patrick Mahomes");
     assert!(dir.path().join("players_nfl.json").exists());
+}
+
+#[test]
+fn a_players_cache_dated_in_the_future_counts_as_fresh() {
+    // Clock skew or a cache copied from another machine: Python's age check
+    // treats a negative age as fresh, so this must not refetch.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let cache = dir.path().join("players_nfl.json");
+    fs::write(&cache, json!({"1": {"full_name": "Cached"}}).to_string()).unwrap();
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(2 * 60 * 60);
+    fs::File::options()
+        .write(true)
+        .open(&cache)
+        .unwrap()
+        .set_modified(future)
+        .unwrap();
+    let api = serve_routes(BTreeMap::new());
+    let client = SleeperClient::with_base_urls(
+        dir.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
+
+    assert_eq!(client.get_players().unwrap()["1"]["full_name"], "Cached");
+    assert!(api.hits.lock().unwrap().is_empty(), "nothing was fetched");
 }

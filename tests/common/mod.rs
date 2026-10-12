@@ -44,7 +44,14 @@ pub fn serve_routes(routes: BTreeMap<String, Value>) -> MockApi {
     let counter = Arc::clone(&hits);
     std::thread::spawn(move || {
         for request in server.incoming_requests() {
-            let path = request.url().split('?').next().unwrap_or("").to_string();
+            // Through a proxy the request line carries the whole URL
+            // ("GET http://host/v1/..."); route on its path either way.
+            let target = request.url();
+            let target = match target.split_once("://") {
+                Some((_, rest)) => rest.find('/').map_or("/", |i| &rest[i..]),
+                None => target,
+            };
+            let path = target.split('?').next().unwrap_or("").to_string();
             *counter
                 .lock()
                 .expect("hit counter")

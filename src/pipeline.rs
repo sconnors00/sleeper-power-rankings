@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Result};
+use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -21,13 +21,13 @@ use crate::compute::preseason::build_preseason_rankings;
 use crate::compute::season::build_season_board;
 use crate::compute::trades::{build_trade_values, nfl_byes, WeekSet};
 use crate::compute::{acquisitions, build_teams, rosters, PLAYOFF_SIMS};
-use crate::config::Settings;
+use crate::config::{Settings, UsageError};
 use crate::models::{PlayoffOddsRow, PreseasonRow, SeasonSummary, WeekSummary};
 use crate::raw::{
     text_of, League, LeagueSettings, PlayerMap, RawDraft, RawMatchup, RawPick, RawRoster,
     RawTransaction, RawUser, State,
 };
-use crate::sleeper::SleeperClient;
+use crate::sleeper::{SleeperClient, SleeperError};
 
 pub type Remaining = BTreeMap<i64, Vec<(i64, i64)>>;
 
@@ -36,8 +36,18 @@ fn parse<T: DeserializeOwned>(value: Value) -> Result<T> {
 }
 
 /// Fetch and parse, or `None` when either step fails.
-fn try_parse<T: DeserializeOwned>(value: Result<Value, crate::sleeper::SleeperError>) -> Option<T> {
+fn try_parse<T: DeserializeOwned>(value: Result<Value, SleeperError>) -> Option<T> {
     value.ok().and_then(|v| parse(v).ok())
+}
+
+/// `None` when the fetch failed (the section is skipped, as in Python), but a
+/// response that doesn't parse is an error: Python would have crashed on it
+/// too, and dropping data silently hides the problem.
+fn fetched<T: DeserializeOwned>(value: Result<Value, SleeperError>) -> Result<Option<T>> {
+    match value {
+        Ok(v) => parse(v).map(Some),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Build the current season and every past season reachable through
@@ -61,8 +71,12 @@ pub fn build_all(
     let league: League = parse(client.get_league(league_id)?)?;
     let mut all = vec![season];
     for past_id in walk_previous_league_ids(client, &league) {
-        if let Ok(past) = build_season(client, &past_id, None, None, false, settings) {
-            all.push(past);
+        // A past season that can't be fetched is left out, as in Python; any
+        // other failure (data that doesn't parse) stops the build loudly.
+        match build_season(client, &past_id, None, None, false, settings) {
+            Ok(past) => all.push(past),
+            Err(err) if err.is::<SleeperError>() => continue,
+            Err(err) => return Err(err.context(format!("building past season (league {past_id})"))),
         }
     }
     Ok(all)
@@ -157,15 +171,18 @@ pub fn build_season(
     provisional: bool,
     settings: &Settings,
 ) -> Result<SeasonSummary> {
+    // An empty --season means no override, like Python's `or`.
+    let season_override = season_override.filter(|s| !s.is_empty());
     let state: State = parse(client.get_state()?)?;
     let league: League = parse(client.get_league(league_id)?)?;
     let season = season_override.map_or_else(|| league.season.clone(), str::to_string);
     if let Some(requested) = season_override {
         if requested != league.season {
-            bail!(
+            return Err(UsageError(format!(
                 "--season {requested} doesn't match league {league_id}'s season ({}).",
                 league.season
-            );
+            ))
+            .into());
         }
     }
 
@@ -275,7 +292,7 @@ pub fn build_season(
     let draft = fetch_draft(client, &league)
         .map(|(draft, picks)| grade_draft(&picks, &players, draft.settings.budget.unwrap_or(0)));
 
-    let preseason = build_preseason(client, &league, &rosters, &players, settings);
+    let preseason = build_preseason(client, &league, &rosters, &players, settings)?;
 
     let trade_values = if is_current && !week_summaries.is_empty() {
         let deadline = league.settings.trade_deadline.unwrap_or(0);
@@ -389,16 +406,17 @@ fn build_preseason(
     current_rosters: &[RawRoster],
     players: &PlayerMap,
     settings: &Settings,
-) -> Vec<PreseasonRow> {
+) -> Result<Vec<PreseasonRow>> {
     let Some(prev_id) = league
         .previous_league_id
         .as_deref()
         .filter(|s| !s.is_empty())
     else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    preseason_from_previous(client, prev_id, league, current_rosters, players, settings)
-        .unwrap_or_default()
+    let rows = preseason_from_previous(client, prev_id, league, current_rosters, players, settings)
+        .with_context(|| format!("building pre-season rankings from league {prev_id}"))?;
+    Ok(rows.unwrap_or_default())
 }
 
 fn preseason_from_previous(
@@ -408,17 +426,22 @@ fn preseason_from_previous(
     current_rosters: &[RawRoster],
     players: &PlayerMap,
     settings: &Settings,
-) -> Option<Vec<PreseasonRow>> {
-    let prev_league: League = try_parse(client.get_league(prev_id))?;
+) -> Result<Option<Vec<PreseasonRow>>> {
+    let Some(prev_league) = fetched::<League>(client.get_league(prev_id))? else {
+        return Ok(None);
+    };
     let prev_season = prev_league.season.clone();
-    let prev_rosters: Vec<RawRoster> = try_parse(client.get_rosters(prev_id, &prev_season))?;
+    let Some(prev_rosters) = fetched::<Vec<RawRoster>>(client.get_rosters(prev_id, &prev_season))?
+    else {
+        return Ok(None);
+    };
     let prev_playoff_start = prev_league.settings.playoff_week_start;
     let mut prev_weeks_raw: BTreeMap<i64, Vec<RawMatchup>> = BTreeMap::new();
     for week in 1..prev_playoff_start {
-        prev_weeks_raw.insert(
-            week,
-            try_parse(client.get_matchups(prev_id, &prev_season, week, true))?,
-        );
+        let Some(raw) = fetched(client.get_matchups(prev_id, &prev_season, week, true))? else {
+            return Ok(None);
+        };
+        prev_weeks_raw.insert(week, raw);
     }
 
     let prev_by_id: RosterMap = prev_rosters
@@ -437,7 +460,9 @@ fn preseason_from_previous(
         settings.form_window,
         None,
     );
-    let last = prev_summaries.last()?;
+    let Some(last) = prev_summaries.last() else {
+        return Ok(None);
+    };
     let mut prev_rankings = last.power_rankings.clone();
     apply_official_records(&mut prev_rankings, &prev_by_id);
 
@@ -472,14 +497,14 @@ fn preseason_from_previous(
         .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
         .and_then(|s| s.parse::<i64>().ok());
 
-    Some(build_preseason_rankings(
+    Ok(Some(build_preseason_rankings(
         &prev_rankings,
         &prev_pf,
         &current_ids,
         &prev_owner,
         &cur_owner,
         champion,
-    ))
+    )))
 }
 
 /// The weeks trade values look ahead to, each with its weight, and the first

@@ -10,7 +10,7 @@ use ffpr::build::{build_data_js, render_site, SiteOptions};
 use ffpr::config::Settings;
 use ffpr::models::{SeasonSummary, Weights};
 use ffpr::pipeline;
-use ffpr::sleeper::SleeperClient;
+use ffpr::sleeper::{ProxySettings, SleeperClient};
 use serde_json::Value;
 
 use common::{season_2025_routes, serve_routes, LEAGUE_2025};
@@ -28,7 +28,12 @@ fn settings() -> Settings {
 /// The 2025 fixture season, built through the same pipeline the CLI uses.
 fn fixture_season(data: &Path) -> SeasonSummary {
     let api = serve_routes(season_2025_routes());
-    let client = SleeperClient::with_base_urls(data, &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        data,
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
     let mut seasons = pipeline::build_all(&client, LEAGUE_2025, None, None, false, &settings())
         .expect("fixture season builds");
     seasons.remove(0)
@@ -119,7 +124,12 @@ fn a_season_with_no_completed_weeks_gets_the_landing_page() {
     let data = tempfile::tempdir().unwrap();
     let out = tempfile::tempdir().unwrap();
     let api = serve_routes(season_2025_routes());
-    let client = SleeperClient::with_base_urls(data.path(), &api.base, &api.schedule_base);
+    let client = SleeperClient::with_base_urls(
+        data.path(),
+        &api.base,
+        &api.schedule_base,
+        ProxySettings::default(),
+    );
     let season = pipeline::build_season(&client, LEAGUE_2025, None, Some(0), false, &settings())
         .expect("season builds through week 0");
     render(&season, out.path());

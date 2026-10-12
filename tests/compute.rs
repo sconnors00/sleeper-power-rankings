@@ -364,3 +364,116 @@ fn rivalries_follow_the_manager_across_rosters() {
         assert_ne!(manager.rivals[0].opponent_id, manager.owner_id);
     }
 }
+
+fn raw<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
+    serde_json::from_value(value).expect("valid raw JSON")
+}
+
+#[test]
+fn float_noise_in_scores_parses_exactly_as_python_does() {
+    // 109.46000000000001 is a different double from 109.46 in Python's
+    // json.loads; a parser that isn't correctly rounded turns this win into a tie.
+    let text = r#"[{"roster_id": 1, "matchup_id": 1, "points": 109.46000000000001},
+                   {"roster_id": 2, "matchup_id": 1, "points": 109.46}]"#;
+    let value: serde_json::Value = serde_json::from_str(text).unwrap();
+    let matchups = parse_week_matchups(
+        &raw::<Vec<RawMatchup>>(value),
+        1,
+        &RosterMap::new(),
+        &PlayerMap::new(),
+    );
+    let h2h = compute_weekly_head_to_head(&matchups, false);
+    assert_eq!(h2h[&1], (1.0, 1));
+    assert_eq!(h2h[&2], (0.0, 1));
+}
+
+#[test]
+fn odd_types_in_transactions_do_not_fail_the_response() {
+    let tx: RawTransaction = raw(serde_json::json!({
+        "status": "complete",
+        "type": "waiver",
+        "adds": {"8150": "7", "9000": null},
+        "drops": {"4046": 7.0},
+        "settings": {"waiver_bid": 5.0},
+        "draft_picks": [{"season": null, "round": "4", "owner_id": "7"}],
+    }));
+    assert_eq!(tx.adds.get("8150"), Some(&7));
+    assert!(!tx.adds.contains_key("9000"));
+    assert_eq!(tx.drops.get("4046"), Some(&7));
+    assert_eq!(tx.settings.waiver_bid, Some(5));
+    assert_eq!(tx.draft_picks[0].owner_id, Some(7));
+    assert_eq!(tx.draft_picks[0].round, Some(4));
+}
+
+#[test]
+fn a_negative_form_window_slices_like_python() {
+    // scores[-(-1):] is scores[1:]: in week 1 that's empty, so every team's
+    // form is 0 and the scaled form is 0.5 across the board.
+    let data = week5();
+    let roster_ids: Vec<i64> = data.rosters.iter().map(|r| r.roster_id).collect();
+    let weeks = build_week_summaries(
+        &roster_ids,
+        &BTreeMap::from([(1, data.matchups.clone())]),
+        &BTreeMap::new(),
+        &data.rosters_by_id,
+        &data.players,
+        false,
+        &weights(),
+        -1,
+        None,
+    );
+    assert!(weeks[0].power_rankings.iter().all(|r| r.form_norm == 0.5));
+}
+
+#[test]
+fn award_ties_between_zero_and_negative_zero_keep_the_first_like_python() {
+    let value = serde_json::json!([
+        {"roster_id": 1, "matchup_id": 1, "points": 10.0, "starters": ["a"], "starters_points": [0.0]},
+        {"roster_id": 2, "matchup_id": 1, "points": 9.0, "starters": ["b"], "starters_points": [-0.0]},
+    ]);
+    let matchups = parse_week_matchups(
+        &raw::<Vec<RawMatchup>>(value),
+        1,
+        &RosterMap::new(),
+        &PlayerMap::new(),
+    );
+    let awards = compute_week_awards(&matchups);
+    assert!(awards.best_starter_points.is_sign_positive());
+    assert!(awards.worst_starter_points.is_sign_positive());
+    assert_eq!(awards.best_starter.len(), 2);
+}
+
+#[test]
+fn head_to_head_totals_use_python_compensated_sums() {
+    use ffpr::models::{HeadToHead, Meeting};
+    let meetings = [0.1, 0.2, 0.3]
+        .iter()
+        .enumerate()
+        .map(|(i, pts)| Meeting::new("2025", i as i64 + 1, *pts, 0.0))
+        .collect();
+    let h2h = HeadToHead::new("rival".into(), meetings);
+    assert_eq!(h2h.points_for, 0.6); // a plain fold gives 0.6000000000000001
+}
+
+#[test]
+fn a_traded_pick_without_a_season_reads_none_like_python() {
+    let tx: RawTransaction = raw(serde_json::json!({
+        "status": "complete",
+        "type": "trade",
+        "adds": {"4046": 2},
+        "roster_ids": [1, 2],
+        "draft_picks": [{"season": null, "round": 4, "owner_id": 2}],
+        "status_updated": 1,
+    }));
+    let summary = ffpr::compute::acquisitions::grade_acquisitions(
+        &BTreeMap::from([(3, vec![tx])]),
+        &[],
+        &PlayerMap::new(),
+    );
+    let side = summary.trades[0]
+        .sides
+        .iter()
+        .find(|s| s.roster_id == 2)
+        .unwrap();
+    assert_eq!(side.picks, vec!["None Rd 4".to_string()]);
+}

@@ -12,7 +12,7 @@ use crate::models::{
     WeekAwards, WeekSummary, Weights,
 };
 use crate::raw::{PlayerMap, RawMatchup, RawRoster, RawTransaction};
-use crate::util::{median, round2};
+use crate::util::{median, py_max, py_min, round2};
 
 pub type RosterMap = HashMap<i64, RawRoster>;
 
@@ -95,13 +95,13 @@ fn tied_extreme(items: &[(i64, f64)], want_max: bool) -> (Vec<i64>, f64) {
     if items.is_empty() {
         return (Vec::new(), 0.0);
     }
-    let best = items.iter().map(|(_, v)| *v).fold(items[0].1, |acc, v| {
-        if want_max {
-            acc.max(v)
-        } else {
-            acc.min(v)
-        }
-    });
+    let values = items.iter().map(|(_, v)| *v);
+    let best = if want_max {
+        py_max(values)
+    } else {
+        py_min(values)
+    }
+    .unwrap_or(0.0);
     (
         items
             .iter()
@@ -182,14 +182,13 @@ pub fn best_by_points(
     if items.is_empty() {
         return (0.0, Vec::new());
     }
-    let mut best = items[0].1.points;
-    for (_, p) in items {
-        best = if want_max {
-            best.max(p.points)
-        } else {
-            best.min(p.points)
-        };
+    let points = items.iter().map(|(_, p)| p.points);
+    let best = if want_max {
+        py_max(points)
+    } else {
+        py_min(points)
     }
+    .unwrap_or(0.0);
     (
         best,
         items
@@ -331,8 +330,8 @@ pub fn compute_power_rankings(
         .collect();
 
     let pf_values: Vec<f64> = roster_ids.iter().map(|&rid| get_f(cum.pf, rid)).collect();
-    let pf_min = pf_values.iter().copied().fold(f64::INFINITY, f64::min);
-    let pf_max = pf_values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let pf_min = py_min(pf_values.iter().copied()).unwrap_or(0.0);
+    let pf_max = py_max(pf_values.iter().copied()).unwrap_or(0.0);
     let pf_norm: BTreeMap<i64, f64> = roster_ids
         .iter()
         .map(|&rid| {
@@ -364,8 +363,9 @@ pub fn compute_power_rankings(
             (rid, avg)
         })
         .collect();
-    let form_min = form_avg.values().copied().fold(f64::INFINITY, f64::min);
-    let form_max = form_avg.values().copied().fold(f64::NEG_INFINITY, f64::max);
+    let form_values: Vec<f64> = roster_ids.iter().map(|rid| form_avg[rid]).collect();
+    let form_min = py_min(form_values.iter().copied()).unwrap_or(0.0);
+    let form_max = py_max(form_values.iter().copied()).unwrap_or(0.0);
     let form_norm: BTreeMap<i64, f64> = roster_ids
         .iter()
         .map(|&rid| {
@@ -894,9 +894,13 @@ pub fn build_week_summaries(
 /// The last `window` scores, as Python's `scores[-window:]` slices them. A
 /// window of 0 keeps the whole history, which is what Python does too.
 fn last_n(scores: &[f64], window: i64) -> Vec<f64> {
-    if window == 0 {
-        return scores.to_vec();
-    }
-    let start = scores.len().saturating_sub(window.unsigned_abs() as usize);
+    let len = scores.len();
+    let start = match window {
+        0 => 0,
+        // scores[-n:]: the last n.
+        w if w > 0 => len.saturating_sub(w as usize),
+        // scores[-(-n):] is scores[n:]: everything after the first n.
+        w => (w.unsigned_abs() as usize).min(len),
+    };
     scores[start..].to_vec()
 }

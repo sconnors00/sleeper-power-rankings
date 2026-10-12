@@ -262,7 +262,7 @@ pub fn replacement_levels(
             .or_else(|| {
                 starters
                     .get(&pos)
-                    .map(|v| v.iter().copied().fold(f64::INFINITY, f64::min))
+                    .and_then(|v| crate::util::py_min(v.iter().copied()))
             });
         if let Some(level) = left {
             levels.insert(pos, level);
