@@ -635,3 +635,49 @@ def test_no_rosters_page_without_a_report(tmp_path, teams_only_season):
     out = tmp_path / "site"
     render_site(teams_only_season, out)
     assert not (out / "rosters.html").exists() and not (out / "rosters.json").exists()
+
+
+def _css_tokens(css: str, selector: str) -> dict[str, str]:
+    """The --custom-property: value pairs declared in `selector { ... }`."""
+    body = css.split(selector + " {", 1)[1].split("}", 1)[0]
+    return dict(re.findall(r"(--[\w-]+):\s*([^;]+);", body))
+
+
+def test_dark_tokens_in_sync():
+    """style.css writes the dark theme twice (follow-the-OS, and the theme
+    button's explicit choice); a token added to one block must be in both."""
+    from ffpr.build import STATIC_DIR
+
+    css = (STATIC_DIR / "style.css").read_text()
+    light = _css_tokens(css, ":root")
+    os_dark = _css_tokens(css, ':root:not([data-theme="light"])')
+    picked_dark = _css_tokens(css, ':root[data-theme="dark"]')
+    assert os_dark and os_dark == picked_dark
+    assert set(os_dark) <= set(light)
+
+
+def test_week_pager_only_when_there_is_another_week(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    """A season with one week page has nowhere to page to: no empty <nav>."""
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    assert '<nav class="pager"' not in (out / "index.html").read_text()
+
+    season.playoff_week_start = 6  # the season recap becomes week 6
+    render_site(season, tmp_path / "recap")
+    week5 = (tmp_path / "recap" / "weeks" / "week-5.html").read_text()
+    assert week5.count('<nav class="pager"') == 2  # under the title and at the bottom
+    assert 'href="../weeks/week-6.html" rel="next">Season recap' in week5
+
+
+def test_season_charts_jump_link_hides_with_the_charts(
+    tmp_path, rosters, users, matchups_week5, transactions_week5, players, league
+):
+    season = _make_season(rosters, users, matchups_week5, transactions_week5, players, league)
+    out = tmp_path / "site"
+    render_site(season, out)
+    html = (out / "season.html").read_text()
+    assert '<a href="#charts" class="chart-only">Charts</a>' in html
+    assert '<section id="charts" class="chart-only">' in html

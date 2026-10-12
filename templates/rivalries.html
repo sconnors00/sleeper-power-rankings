@@ -7,12 +7,14 @@
 <div class="page-head">
   <span class="page-kicker">{{ all_seasons | min }}&ndash;{{ all_seasons | max }}</span>
   <h1 class="page-title">Rivalries</h1>
-  <p class="lede">Head-to-head records between managers across every season on this site, regular season only. A record follows the manager, not the roster. <a href="how-it-works.html#rivalries">How this works</a></p>
+  <p class="lede">Head-to-head records between managers across every season on this site, regular season only. A record follows the manager, not the roster. <a href="{{ asset_prefix }}how-it-works.html#rivalries">How this works</a></p>
 </div>
 
 {% set one_sided, even, streak = highlights.one_sided, highlights.even, highlights.streak %}
 {% if one_sided or even or streak %}
-<div class="awards-grid">
+<section id="highlights" class="bare">
+  <h2>Highlights</h2>
+  <div class="awards-grid">
   {% if one_sided %}
   {% set m, h = one_sided[0], one_sided[1] %}
   {% call ui.award("Most one-sided", h.record) %}
@@ -32,21 +34,22 @@
   <p class="award-teams">{{ m.name }} over {{ by_id[h.opponent_id].name }}, since {{ since.season }} Wk {{ since.week }}</p>
   {% endcall %}
   {% endif %}
-</div>
+  </div>
+</section>
 {% endif %}
 
 <section id="standings">
   <h2>All-time standings</h2>
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Manager</th><th class="num">Seasons</th><th class="num">Record</th><th>Win %</th></tr></thead>
+    <thead><tr><th>Manager</th><th>Win %</th><th class="num">Record</th><th class="num">Seasons</th></tr></thead>
     <tbody>
       {% for m in managers %}
       <tr>
         {{ ui.team_cell(m, rank=loop.index) }}
-        <td class="num">{{ m.seasons | length }}</td>
-        <td class="num">{{ m.wins }}-{{ m.losses }}{% if m.ties %}-{{ m.ties }}{% endif %}</td>
         <td>{{ ui.meter(m.win_pct, "%.1f%%" | format(m.win_pct * 100), "good" if m.win_pct >= 0.5 else "bad") }}</td>
+        <td class="num">{{ m.wins }}-{{ m.losses }}{% if m.ties %}-{{ m.ties }}{% endif %}</td>
+        <td class="num">{{ m.seasons | length }}</td>
       </tr>
       {% endfor %}
     </tbody>

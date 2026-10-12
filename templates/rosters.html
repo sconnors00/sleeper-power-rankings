@@ -1,15 +1,18 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui with context %}
 {% set active_page = "rosters" %}
+{#- Lineup slot labels short enough for a narrow column; the full name is
+    the label's tooltip. -#}
+{% set slot_short = {"SUPER_FLEX": "SF", "REC_FLEX": "W/T", "WRRB_FLEX": "W/R", "IDP_FLEX": "IDP"} %}
 {% block title %}Rosters &middot; {{ league_name }}{% endblock %}
 {% block content %}
 
 <div class="page-head">
   <h1 class="page-title">Rosters &amp; FAAB</h1>
-  <p class="lede">Every team's lineup, bench, IR and taxi squad{% if report.faab_budget %}, and how much of the ${{ report.faab_budget }} FAAB budget each has left{% endif %}. The same data is available as JSON for scripts: <a href="rosters.json">rosters.json</a>.</p>
+  <p class="lede">Every team's lineup, bench, IR and taxi squad{% if report.faab_budget %}, and how much of the ${{ report.faab_budget }} FAAB budget each has left{% endif %}. The same data is available as JSON for scripts: <a href="{{ asset_prefix }}rosters.json">rosters.json</a>.</p>
 </div>
 
-<nav class="page-toc" aria-label="Teams">
+<nav class="page-toc page-toc-wrap" aria-label="Teams">
   {% if report.faab_budget %}<a href="#faab">FAAB</a>{% endif %}
   {% for t in report.teams %}<a href="#team-{{ t.roster_id }}">{{ teams[t.roster_id].name }}</a>{% endfor %}
 </nav>
@@ -36,26 +39,23 @@
 </section>
 {% endif %}
 
-<div class="card-row">
+<div class="card-row rosters">
 {% for t in report.teams %}
 {% set team = teams[t.roster_id] %}
 <section id="team-{{ t.roster_id }}">
-  <div class="section-head">
-    <h2>{{ ui.team_inline(team) }}</h2>
-    <span class="note-inline">{{ t.record }}{% if report.faab_budget %} &middot; ${{ t.faab_remaining }} FAAB left{% endif %}</span>
-  </div>
+  {% call ui.section_head(ui.team_inline(team)) %}
+  <span class="note-inline">{{ t.record }}{% if report.faab_budget %} &middot; ${{ t.faab_remaining }} FAAB left{% endif %}</span>
+  {% endcall %}
   <div class="table-scroll">
   <table class="data-table">
-    <thead><tr><th>Slot</th><th>Player</th><th>Pos</th><th>NFL</th></tr></thead>
+    <thead><tr><th>Slot</th><th>Player</th></tr></thead>
     <tbody>
       {% for group in (t.starters, t.bench, t.ir, t.taxi) %}
       {% set outer = loop %}
       {% for p in group %}
       <tr{% if loop.first and not outer.first %} class="group-start"{% endif %}>
-        <td><span class="slot slot-{{ p.slot | lower }}">{{ p.slot }}</span></td>
-        <td>{{ p.name }}{% if p.injury %} <span class="inj">{{ p.injury[:3] | upper if p.injury != "Questionable" else "Q" }}</span>{% endif %}</td>
-        <td>{{ p.position }}</td>
-        <td>{{ p.nfl_team or "FA" }}</td>
+        <td><span class="slot slot-{{ p.slot | lower }}" title="{{ p.slot }}">{{ slot_short.get(p.slot, p.slot) }}</span></td>
+        <td>{{ p.name }} <span class="note-inline">{{ p.position }} &middot; {{ p.nfl_team or "FA" }}</span>{% if p.injury %} <span class="inj" title="{{ p.injury }}">{{ p.injury[:3] | upper if p.injury != "Questionable" else "Q" }}</span>{% endif %}</td>
       </tr>
       {% endfor %}
       {% endfor %}

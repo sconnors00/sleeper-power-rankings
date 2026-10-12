@@ -50,13 +50,13 @@ from ffpr.models import (
     WeekSummary,
 )
 
-# 12 fixed, stable-order team colors. The first 8 are the validated
+# 12 fixed, stable-order team colors, with a matching set tuned for the dark
+# theme (a team keeps the same slot in both). The first 8 are the validated
 # categorical palette (dataviz skill, references/palette.md); slots 9-12
 # extend it for a 12-team league. At this series count no ordering clears
-# the all-pairs CVD floor (the palette tops out at 3 slots for that), so
-# every chart that uses these colors also direct-labels or offers a legend
-# tap-to-isolate interaction and a plain-text table alternative -- identity
-# never rests on color alone.
+# the all-pairs CVD floor, so identity never rests on color alone: every
+# team mark sits next to the team's name, the rank chart labels its lines
+# directly, and the weekly-points chart highlights one team at a time.
 TEAM_COLORS_LIGHT = [
     "#2a78d6",  # 1 blue
     "#eb6834",  # 2 orange
@@ -122,6 +122,7 @@ def build_teams(rosters: list[dict], users: list[dict]) -> dict[int, Team]:
             avatar_url=resolve_avatar_url(user),
             color=TEAM_COLORS_LIGHT[i % len(TEAM_COLORS_LIGHT)],
             owner_name=(user or {}).get("display_name"),
+            color_dark=TEAM_COLORS_DARK[i % len(TEAM_COLORS_DARK)],
         )
     return teams
 
@@ -1681,13 +1682,15 @@ def build_rivalries(seasons: list[SeasonSummary]) -> list[Manager]:
     isn't a win over anyone.
     """
     meetings: dict[str, dict[str, list[Meeting]]] = {}
-    # owner -> (Sleeper name, color) from their latest season; team names change
-    # every year, so the person's account name is what identifies them here
-    profile: dict[str, tuple[str, str]] = {}
+    # owner -> (Sleeper name, color, dark color) from their latest season; team
+    # names change every year, so the person's account name identifies them
+    profile: dict[str, tuple[str, str, str | None]] = {}
     for s in sorted(seasons, key=lambda s: s.season, reverse=True):
         for team in s.teams.values():
             if team.owner_id:
-                profile.setdefault(team.owner_id, (team.owner_name or team.name, team.color))
+                profile.setdefault(
+                    team.owner_id, (team.owner_name or team.name, team.color, team.color_dark)
+                )
         for wk in s.weeks:
             pairs: dict[int, list[Matchup]] = {}
             for m in wk.matchups:
@@ -1714,9 +1717,9 @@ def build_rivalries(seasons: list[SeasonSummary]) -> list[Manager]:
             for opp, ms in by_opponent.items()
         ]
         rivals.sort(key=lambda h: (-len(h.meetings), -h.wins, h.opponent_id))
-        name, color = profile[owner]
+        name, color, color_dark = profile[owner]
         played = sorted({m.season for h in rivals for m in h.meetings}, reverse=True)
-        managers.append(Manager(owner, name, color, played, rivals))
+        managers.append(Manager(owner, name, color, played, rivals, color_dark))
     managers.sort(key=lambda m: (-m.win_pct, -m.wins, m.name))
     return managers
 
