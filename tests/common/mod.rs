@@ -74,6 +74,84 @@ pub fn serve_routes(routes: BTreeMap<String, Value>) -> MockApi {
     }
 }
 
+/// Like [`serve_routes`], but over HTTPS with a certificate for 127.0.0.1
+/// signed by the throwaway test CA in `tests/fixtures/tls/ca.pem`. Each
+/// connection carries one request and is then closed.
+pub fn serve_routes_tls(routes: BTreeMap<String, Value>) -> MockApi {
+    use rustls::pki_types::pem::PemObject;
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use std::io::{Read, Write};
+
+    let chain = CertificateDer::pem_file_iter(fixture_path("tls/server.pem"))
+        .and_then(|certs| certs.collect::<Result<Vec<_>, _>>())
+        .expect("test certificate");
+    let key = PrivateKeyDer::from_pem_file(fixture_path("tls/server.key")).expect("test key");
+    let config = Arc::new(
+        rustls::ServerConfig::builder_with_provider(
+            rustls::crypto::ring::default_provider().into(),
+        )
+        .with_safe_default_protocol_versions()
+        .expect("TLS versions")
+        .with_no_client_auth()
+        .with_single_cert(chain, key)
+        .expect("server TLS config"),
+    );
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local port");
+    let port = listener.local_addr().expect("local address").port();
+    let routes = Arc::new(routes);
+    let hits = Arc::new(Mutex::new(BTreeMap::new()));
+    let counter = Arc::clone(&hits);
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let (config, routes, counter) = (
+                Arc::clone(&config),
+                Arc::clone(&routes),
+                Arc::clone(&counter),
+            );
+            std::thread::spawn(move || {
+                let Ok(conn) = rustls::ServerConnection::new(config) else {
+                    return;
+                };
+                let mut tls = rustls::StreamOwned::new(conn, stream);
+                // Read the request head; a client that rejects the
+                // certificate ends the handshake here instead.
+                let mut head = Vec::new();
+                let mut buf = [0u8; 4096];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match tls.read(&mut buf) {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => head.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&head);
+                let target = head.split_whitespace().nth(1).unwrap_or("/");
+                let path = target.split('?').next().unwrap_or("").to_string();
+                *counter
+                    .lock()
+                    .expect("hit counter")
+                    .entry(path.clone())
+                    .or_insert(0) += 1;
+                let (status, body) = match routes.get(&path) {
+                    Some(body) => ("200 OK", body.to_string()),
+                    None => ("404 Not Found", "not found".to_string()),
+                };
+                let _ = write!(
+                    tls,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                tls.conn.send_close_notify();
+                let _ = tls.flush();
+            });
+        }
+    });
+    MockApi {
+        base: format!("https://127.0.0.1:{port}/v1"),
+        schedule_base: format!("https://127.0.0.1:{port}/schedule/nfl/regular"),
+        hits,
+    }
+}
+
 /// Everything a 2025 (past season) build reads, from the committed fixtures.
 /// Weeks 1-5 are the fixture week; later weeks are empty, as an unplayed
 /// schedule would be to the build. The 2025 league has no draft and no

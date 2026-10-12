@@ -8,7 +8,7 @@ HTML/CSS/JS, rebuilt from scratch on every run and hosted with GitHub Pages.
 
 ## Setup
 
-Requires a stable [Rust toolchain](https://rustup.rs) (1.87 or newer).
+Requires a stable [Rust toolchain](https://rustup.rs) (1.88 or newer).
 
 ```bash
 git clone https://github.com/sconnors00/sleeper-power-rankings.git
@@ -41,13 +41,15 @@ ffpr blurb              # print a chat-ready recap of the latest week
 cargo run --release -- build
 ```
 
-Every command accepts `--league <id>` and `--season <year>` overrides.
+`build` and `blurb` accept `--league <id>` and `--season <year>` overrides.
 
-Raw Sleeper API responses are cached under `data/<season>/raw/` (gitignored)
-so completed weeks are never refetched and builds work offline once cached;
-the in-progress week and league/roster/user data are always refetched. The
-`data/players_nfl.json` cache (the ~5 MB player map) refreshes at most once a
-day, per Sleeper's guidance.
+Raw Sleeper API responses are cached under `data/<season>/raw/` (gitignored).
+Past seasons are served from that cache and never refetched; the current
+season's weeks and league/roster/user data are refetched on every build
+(stat corrections and waivers keep changing a week after its games), falling
+back to the cache when the network is unavailable, so builds work offline
+once cached. The `data/players_nfl.json` cache (the ~13 MB player map)
+refreshes at most once a day, per Sleeper's guidance.
 
 ## Tuning the power rankings
 
@@ -198,9 +200,10 @@ at `https://sconnors00.github.io/sleeper-power-rankings/` (already set as
 `site_url` in `config.toml`).
 
 Note: GitHub Actions' `schedule` cron is UTC-only (no timezone support), so
-the workflow is pinned to `11:00 UTC` Tuesdays, which is 7:00am during EDT
-and drifts to 6:00am during EST (the US DST boundary). Adjust the cron in
-`.github/workflows/build.yml` if you want it exact year-round.
+the workflow is pinned to `11:41 UTC` Tuesdays (with a `15:41 UTC` backstop
+run), which is 7:41am during EDT and drifts to 6:41am during EST (the US DST
+boundary). Adjust the cron in `.github/workflows/build.yml` if you want it
+exact year-round.
 
 Because `site/` is fully self-contained (relative asset paths, no absolute
 domain references), the same output can also be rsynced to nginx on the
@@ -218,14 +221,18 @@ cargo fmt --all                       # format (CI checks with --check)
 `tests/fixtures/` holds real (trimmed) Sleeper API responses from one week of
 a past season so the computations and pages can be tested without hitting the
 network. The CLI tests run the real binary against a local stand-in for the
-Sleeper API that serves those fixtures.
+Sleeper API that serves those fixtures. `tests/fixtures/tls/` is a throwaway test CA and
+127.0.0.1 certificate (private key included, trusted nowhere else) for the
+HTTPS test.
 
 `SLEEPER_API_BASE` and `SLEEPER_SCHEDULE_BASE` override the API root and the NFL
 schedule root, which is how those tests (and any offline mirror) point the
 build somewhere else.
 
 Requests honour the usual `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and
-`NO_PROXY` environment variables, as the Python version (httpx) did.
+`NO_PROXY` environment variables, as the Python version (httpx) did. Behind a
+proxy that re-signs TLS, point `SSL_CERT_FILE` (a PEM bundle) or `SSL_CERT_DIR`
+at its CA certificate; it is trusted alongside the bundled roots.
 
 ### Layout
 

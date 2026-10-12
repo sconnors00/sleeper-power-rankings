@@ -5,7 +5,9 @@ mod common;
 use std::fs;
 use std::process::Command;
 
-use common::{fixture, season_2025_routes, serve_routes, LEAGUE_2025};
+use common::{
+    fixture, fixture_path, season_2025_routes, serve_routes, serve_routes_tls, LEAGUE_2025,
+};
 
 const PROXY_VARS: [&str; 8] = [
     "HTTP_PROXY",
@@ -176,6 +178,47 @@ fn requests_go_through_the_proxy_in_the_environment() {
         .output()
         .expect("runs");
     assert!(!output.status.success());
+}
+
+#[test]
+fn https_trusts_the_ca_bundle_named_by_ssl_cert_file() {
+    // A TLS-intercepting proxy presents certificates from its own CA, which
+    // the build trusts only through SSL_CERT_FILE / SSL_CERT_DIR (as httpx does).
+    let api = serve_routes_tls(season_2025_routes());
+    let dir = tempfile::tempdir().unwrap();
+    let ca = fixture_path("tls/ca.pem");
+
+    let untrusted = ffpr(dir.path(), &api)
+        .env_remove("SSL_CERT_FILE")
+        .env_remove("SSL_CERT_DIR")
+        .args(["blurb", "--league", LEAGUE_2025])
+        .output()
+        .expect("runs");
+    assert!(!untrusted.status.success());
+    assert!(
+        stderr(&untrusted).contains("UnknownIssuer"),
+        "{}",
+        stderr(&untrusted)
+    );
+
+    let trusted = ffpr(dir.path(), &api)
+        .env("SSL_CERT_FILE", &ca)
+        .env_remove("SSL_CERT_DIR")
+        .args(["blurb", "--league", LEAGUE_2025])
+        .output()
+        .expect("runs");
+    assert!(trusted.status.success(), "{}", stderr(&trusted));
+    assert!(String::from_utf8_lossy(&trusted.stdout).contains("Week 5 recap"));
+
+    let ca_dir = tempfile::tempdir().unwrap();
+    fs::copy(&ca, ca_dir.path().join("test-ca.pem")).unwrap();
+    let from_dir = ffpr(dir.path(), &api)
+        .env_remove("SSL_CERT_FILE")
+        .env("SSL_CERT_DIR", ca_dir.path())
+        .args(["blurb", "--league", LEAGUE_2025])
+        .output()
+        .expect("runs");
+    assert!(from_dir.status.success(), "{}", stderr(&from_dir));
 }
 
 #[test]

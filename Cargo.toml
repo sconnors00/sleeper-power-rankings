@@ -2,6 +2,7 @@
 name = "ffpr"
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.88"
 description = "Sleeper fantasy football power rankings static site generator"
 default-run = "ffpr"
 
@@ -10,12 +11,16 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
 minijinja = "2"
+# The same rustls (ring provider) and root store ureq uses, to add CAs from
+# SSL_CERT_FILE / SSL_CERT_DIR.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 sha2 = "0.10"
 tiny_http = "0.12"
 toml = "0.8"
 ureq = "2"
+webpki-roots = "0.26"
 
 [dev-dependencies]
 tempfile = "3"

@@ -30,9 +30,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Completed weeks and the ~5 MB players map never change, so carry the
-      # raw-response cache between runs; restore-keys lets a new week reuse
-      # last week's entry and only fetch what's new.
+      # Past seasons' raw responses never change, so carry the cache between
+      # runs (the current season is always refetched, and the ~13 MB players
+      # map at most daily); restore-keys lets each run reuse the last entry.
       - uses: actions/cache@v4
         with:
           path: data

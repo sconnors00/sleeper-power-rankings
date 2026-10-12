@@ -94,7 +94,6 @@ fn run(cli: Cli) -> Result<()> {
                 )
                 .into());
             }
-            println!("Serving site/ at http://localhost:{port}/ (Ctrl+C to stop)");
             serve::serve(site, port)
         }
         Command::Blurb {

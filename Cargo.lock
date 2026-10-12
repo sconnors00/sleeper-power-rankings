@@ -238,6 +238,7 @@ dependencies = [
  "clap",
  "indexmap",
  "minijinja",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
@@ -245,6 +246,7 @@ dependencies = [
  "tiny_http",
  "toml",
  "ureq",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

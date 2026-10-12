@@ -1,17 +1,19 @@
 //! Read-only Sleeper API client with an on-disk cache under `data/`.
 //!
-//! Completed-week responses are cached and reused; the in-progress week and
-//! league/roster/user data are always refetched, falling back to a cached copy
-//! when the network is unavailable (so offline builds still work). Responses
-//! are cached as the raw JSON Sleeper sent.
+//! A finished season's weeks are cached and reused; the current season's weeks
+//! and league/roster/user data are always refetched, falling back to a cached
+//! copy when the network is unavailable (so offline builds still work).
+//! Responses are cached as the raw JSON Sleeper sent.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::CertificateDer;
 use serde_json::Value;
 
 pub const DEFAULT_BASE_URL: &str = "https://api.sleeper.app/v1";
@@ -58,6 +60,8 @@ pub struct SleeperClient {
     proxies: ProxySettings,
     /// One HTTP agent per proxy ("" for direct), so connections are reused.
     agents: Mutex<HashMap<String, ureq::Agent>>,
+    /// TLS settings with extra trusted CAs, or `None` for ureq's defaults.
+    tls: Option<Arc<rustls::ClientConfig>>,
     base_url: String,
     schedule_base: String,
 }
@@ -142,18 +146,86 @@ impl ProxySettings {
     }
 }
 
+/// The CA certificates httpx (and so the Python version) trusts in place of
+/// its bundled roots: the bundle in `SSL_CERT_FILE`, or else the certificate
+/// files in `SSL_CERT_DIR`. A TLS-intercepting proxy is reachable only when its
+/// CA is among them. Empty when neither variable is set.
+pub fn extra_ca_certs(
+    get: impl Fn(&str) -> Option<String>,
+) -> Result<Vec<CertificateDer<'static>>> {
+    let var = |name: &str| get(name).filter(|v| !v.is_empty());
+    let (name, files) = if let Some(file) = var("SSL_CERT_FILE") {
+        ("SSL_CERT_FILE", vec![PathBuf::from(file)])
+    } else if let Some(dir) = var("SSL_CERT_DIR") {
+        let entries = fs::read_dir(&dir)
+            .map_err(|e| SleeperError(format!("cannot read SSL_CERT_DIR {dir}: {e}")))?;
+        let mut files: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|path| path.is_file())
+            .collect();
+        files.sort();
+        ("SSL_CERT_DIR", files)
+    } else {
+        return Ok(Vec::new());
+    };
+    let mut certs = Vec::new();
+    for path in &files {
+        let parsed = CertificateDer::pem_file_iter(path)
+            .and_then(|items| items.collect::<std::result::Result<Vec<_>, _>>())
+            .map_err(|e| SleeperError(format!("cannot read {name} {}: {e}", path.display())));
+        match parsed {
+            Ok(found) => certs.extend(found),
+            // A directory may hold other files; a named bundle must be readable.
+            Err(err) if name == "SSL_CERT_FILE" => return Err(err),
+            Err(_) => {}
+        }
+    }
+    if certs.is_empty() {
+        let source = var(name).unwrap_or_default();
+        return Err(SleeperError(format!(
+            "no certificates found in {name} {source}"
+        )));
+    }
+    Ok(certs)
+}
+
+/// ureq's own TLS settings, with `extra` CAs trusted alongside its bundled roots.
+fn tls_config(extra: Vec<CertificateDer<'static>>) -> Arc<rustls::ClientConfig> {
+    let mut roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    roots.add_parsable_certificates(extra);
+    let config = rustls::ClientConfig::builder_with_provider(
+        rustls::crypto::ring::default_provider().into(),
+    )
+    .with_protocol_versions(&[&rustls::version::TLS12, &rustls::version::TLS13])
+    .expect("the ring provider supports TLS 1.2 and 1.3")
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    Arc::new(config)
+}
+
 type Settled<'a> = Option<&'a dyn Fn(&Value) -> bool>;
 
 impl SleeperClient {
-    /// A client for the real API, using the proxy settings in the environment.
-    /// `SLEEPER_API_BASE` and `SLEEPER_SCHEDULE_BASE` override the two base
-    /// URLs, for pointing a build at a mock server.
+    /// A client for the real API, using the proxy settings and CA certificates
+    /// in the environment. `SLEEPER_API_BASE` and `SLEEPER_SCHEDULE_BASE`
+    /// override the two base URLs, for pointing a build at a mock server.
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         let base_url =
             std::env::var("SLEEPER_API_BASE").unwrap_or_else(|_| DEFAULT_BASE_URL.into());
         let schedule_base =
             std::env::var("SLEEPER_SCHEDULE_BASE").unwrap_or_else(|_| DEFAULT_SCHEDULE_BASE.into());
-        Self::with_base_urls(data_dir, base_url, schedule_base, ProxySettings::from_env())
+        let client =
+            Self::with_base_urls(data_dir, base_url, schedule_base, ProxySettings::from_env());
+        match extra_ca_certs(|name| std::env::var(name).ok()) {
+            Ok(certs) if certs.is_empty() => client,
+            Ok(certs) => client.with_extra_ca_certs(certs),
+            Err(err) => {
+                eprintln!("Warning: {err}; trusting only the bundled CA certificates");
+                client
+            }
+        }
     }
 
     /// A client that reads from the given base URLs (the API root, and the NFL
@@ -168,9 +240,16 @@ impl SleeperClient {
             data_dir: data_dir.into(),
             proxies,
             agents: Mutex::new(HashMap::new()),
+            tls: None,
             base_url: base_url.into(),
             schedule_base: schedule_base.into(),
         }
+    }
+
+    /// Trust `certs` alongside the bundled CA roots for every request.
+    fn with_extra_ca_certs(mut self, certs: Vec<CertificateDer<'static>>) -> Self {
+        self.tls = Some(tls_config(certs));
+        self
     }
 
     fn agent_for(&self, url: &str) -> ureq::Agent {
@@ -189,6 +268,9 @@ impl SleeperClient {
                     .and_then(|p| ureq::Proxy::new(p).ok())
                 {
                     builder = builder.proxy(p);
+                }
+                if let Some(tls) = &self.tls {
+                    builder = builder.tls_config(Arc::clone(tls));
                 }
                 builder.build()
             })
@@ -358,7 +440,7 @@ impl SleeperClient {
         self.cache_first_url(&url, &cache, Some(&non_empty))
     }
 
-    /// `/players/nfl` (about 5 MB), cached and refreshed at most once a day.
+    /// `/players/nfl` (about 13 MB), cached and refreshed at most once a day.
     pub fn get_players(&self) -> Result<Value> {
         let cache = self.data_dir.join("players_nfl.json");
         if let Ok(meta) = fs::metadata(&cache) {
@@ -468,5 +550,56 @@ mod tests {
             settings(&[("HTTP_PROXY", "http://p:1"), ("NO_PROXY", "*")]).proxy_for("http://x/v1"),
             None
         );
+    }
+
+    fn ca_certs(vars: &[(&str, &str)]) -> Result<Vec<CertificateDer<'static>>> {
+        let vars: HashMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        extra_ca_certs(|name| vars.get(name).cloned())
+    }
+
+    fn tls_fixture(name: &str) -> String {
+        format!("{}/tests/fixtures/tls/{name}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    #[test]
+    fn no_ca_variables_means_no_extra_certificates() {
+        assert!(ca_certs(&[]).unwrap().is_empty());
+        assert!(ca_certs(&[("SSL_CERT_FILE", ""), ("SSL_CERT_DIR", "")])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn ssl_cert_file_is_read_and_wins_over_ssl_cert_dir() {
+        let certs = ca_certs(&[
+            ("SSL_CERT_FILE", &tls_fixture("ca.pem")),
+            ("SSL_CERT_DIR", "/nonexistent"),
+        ])
+        .unwrap();
+        assert_eq!(certs.len(), 1);
+    }
+
+    #[test]
+    fn ssl_cert_dir_reads_every_certificate_file_and_skips_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::copy(tls_fixture("ca.pem"), dir.path().join("a.pem")).unwrap();
+        fs::copy(tls_fixture("server.pem"), dir.path().join("b.pem")).unwrap();
+        fs::write(dir.path().join("README"), "not a certificate").unwrap();
+        let certs = ca_certs(&[("SSL_CERT_DIR", dir.path().to_str().unwrap())]).unwrap();
+        assert_eq!(certs.len(), 2);
+    }
+
+    #[test]
+    fn an_unusable_ca_bundle_is_an_error() {
+        let missing = ca_certs(&[("SSL_CERT_FILE", "/nonexistent/ca.pem")]).unwrap_err();
+        assert!(missing.0.contains("SSL_CERT_FILE"), "{missing}");
+        let dir = tempfile::tempdir().unwrap();
+        let empty = dir.path().join("empty.pem");
+        fs::write(&empty, "no certificates here").unwrap();
+        let none = ca_certs(&[("SSL_CERT_FILE", empty.to_str().unwrap())]).unwrap_err();
+        assert!(none.0.contains("no certificates found"), "{none}");
     }
 }

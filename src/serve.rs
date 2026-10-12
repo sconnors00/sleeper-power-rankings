@@ -10,6 +10,10 @@ use tiny_http::{Header, Method, Response, ResponseBox};
 pub fn serve(root: &Path, port: u16) -> Result<()> {
     let server = tiny_http::Server::http(("0.0.0.0", port))
         .map_err(|e| anyhow::anyhow!("cannot listen on port {port}: {e}"))?;
+    println!(
+        "Serving {}/ at http://localhost:{port}/ (Ctrl+C to stop)",
+        root.display()
+    );
     for request in server.incoming_requests() {
         let response = respond(root, request.method(), request.url());
         let _ = request.respond(response);
