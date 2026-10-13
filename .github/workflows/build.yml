@@ -2,14 +2,14 @@ name: Build and deploy site
 
 on:
   schedule:
-    # Tuesday ~7:40am America/New_York. GitHub Actions cron is UTC-only, so
-    # this drifts by an hour across the DST boundary (~7:40am EDT / ~6:40am
+    # Tuesday ~3:11am America/New_York. GitHub Actions cron is UTC-only, so
+    # this drifts by an hour across the DST boundary (~3:11am EDT / ~2:11am
     # EST). Deliberately off the top of the hour: GitHub queues every ":00"
     # cron at once and this build once waited 4h20m behind that backlog.
     # The second entry is a backstop for a first run GitHub drops outright;
     # a rebuild is idempotent, so the duplicate is a cheap no-op.
-    - cron: "41 11 * * 2"
-    - cron: "41 15 * * 2"
+    - cron: "11 7 * * 2"
+    - cron: "11 11 * * 2"
   workflow_dispatch: {}
   push:
     branches: [main]
